@@ -2,7 +2,7 @@
 
 from bot.models.base import Base
 from bot.models.contest import Contest, ContestStatus, ContestSubmission, ContestType, ContestVote
-from bot.models.database import async_session, engine, init_db
+from bot.models.database import async_session, engine, init_db, close_db
 from bot.models.giveaway import Giveaway, GiveawayParticipant, GiveawayStatus, GiveawayWinner
 from bot.models.loyalty import LoyaltyPoints, PointsTransaction
 from bot.models.moderation import Blacklist, ContentFlag, RateLimitLog
@@ -19,5 +19,5 @@ __all__ = [
     "AlertSubscription", "ScheduledReminder",
     "Referral",
     "UserSettings",
-    "async_session", "engine", "init_db",
+    "async_session", "engine", "init_db", "close_db",
 ]

@@ -21,6 +21,7 @@ from bot.jobs import (
     send_reminders,
 )
 from bot.models import init_db
+from bot.models.database import close_db
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -32,8 +33,9 @@ logger = logging.getLogger(__name__)
 async def post_init(application: Application) -> None:
     """Initialize database and schedule jobs."""
     logger.info("Initializing database...")
+    logger.info(f"Database: {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else settings.DATABASE_URL}")
     await init_db()
-    logger.info("Database initialized successfully.")
+    logger.info("Database initialized successfully (PostgreSQL).")
 
     # Schedule recurring jobs
     job_queue = application.job_queue
@@ -47,6 +49,13 @@ async def post_init(application: Application) -> None:
         # Send new event alerts every 5 minutes
         job_queue.run_repeating(send_new_event_alerts, interval=300, first=60)
         logger.info("Scheduled jobs registered.")
+
+
+async def post_shutdown(application: Application) -> None:
+    """Clean up database connections on shutdown."""
+    logger.info("Closing database connections...")
+    await close_db()
+    logger.info("Database connections closed.")
 
 
 def main() -> None:
@@ -64,6 +73,7 @@ def main() -> None:
         Application.builder()
         .token(settings.BOT_TOKEN)
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
 
