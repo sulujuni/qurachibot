@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QurachiBot Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="refresh-indicator" id="refreshIndicator">Auto-refresh: 30s</div>
+    <div class="container">
+        <header class="header">
+            <h1>QurachiBot Dashboard</h1>
+            <p>Giveaway & Contest Bot — Live Statistics</p>
+        </header>
+
+        <!-- Stats Overview -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="icon">🎉</div>
+                <div class="value" id="statGwTotal">{{ gw_total }}</div>
+                <div class="label">Total Giveaways</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🟢</div>
+                <div class="value" id="statGwActive">{{ gw_active }}</div>
+                <div class="label">Active Giveaways</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">👤</div>
+                <div class="value" id="statParticipants">{{ total_participants }}</div>
+                <div class="label">Participations</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🏆</div>
+                <div class="value" id="statWinners">{{ total_winners }}</div>
+                <div class="label">Winners</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🏅</div>
+                <div class="value" id="statCtTotal">{{ ct_total }}</div>
+                <div class="label">Total Contests</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">📤</div>
+                <div class="value" id="statSubmissions">{{ total_submissions }}</div>
+                <div class="label">Submissions</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">👥</div>
+                <div class="value" id="statUsers">{{ unique_users }}</div>
+                <div class="label">Unique Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🔗</div>
+                <div class="value" id="statReferrals">{{ total_referrals }}</div>
+                <div class="label">Referrals</div>
+            </div>
+        </div>
+
+        <!-- Recent Giveaways -->
+        <div class="section">
+            <h2 class="section-title">🎉 Recent Giveaways</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Title</th>
+                            <th>Prize</th>
+                            <th>Participants</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for gw in recent_giveaways %}
+                        <tr>
+                            <td>#{{ gw.id }}</td>
+                            <td><strong>{{ gw.title }}</strong></td>
+                            <td>{{ gw.prize }}</td>
+                            <td>{{ gw.participants | length }}</td>
+                            <td>
+                                {% if gw.status.value == 'active' %}
+                                <span class="badge badge-active">Active</span>
+                                {% elif gw.status.value == 'completed' %}
+                                <span class="badge badge-completed">Completed</span>
+                                {% else %}
+                                <span class="badge badge-cancelled">Cancelled</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ gw.created_at.strftime('%Y-%m-%d %H:%M') if gw.created_at else 'N/A' }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not recent_giveaways %}
+                        <tr><td colspan="6" style="text-align:center; color: var(--text-secondary);">No giveaways yet</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Recent Contests -->
+        <div class="section">
+            <h2 class="section-title">🏅 Recent Contests</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Title</th>
+                            <th>Type</th>
+                            <th>Submissions</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ct in recent_contests %}
+                        <tr>
+                            <td>#{{ ct.id }}</td>
+                            <td><strong>{{ ct.title }}</strong></td>
+                            <td>{{ ct.contest_type.value }}</td>
+                            <td>{{ ct.submissions | length }}</td>
+                            <td>
+                                {% if ct.status.value == 'accepting_submissions' %}
+                                <span class="badge badge-active">Accepting</span>
+                                {% elif ct.status.value == 'voting' %}
+                                <span class="badge badge-voting">Voting</span>
+                                {% elif ct.status.value == 'completed' %}
+                                <span class="badge badge-completed">Completed</span>
+                                {% else %}
+                                <span class="badge badge-cancelled">Cancelled</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ ct.created_at.strftime('%Y-%m-%d %H:%M') if ct.created_at else 'N/A' }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not recent_contests %}
+                        <tr><td colspan="6" style="text-align:center; color: var(--text-secondary);">No contests yet</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Leaderboard -->
+        <div class="section">
+            <h2 class="section-title">🏆 Leaderboard — Top 10</h2>
+            <div class="table-wrapper">
+                {% for user in leaderboard %}
+                <div class="leaderboard-item">
+                    <span class="lb-rank {% if loop.index == 1 %}gold{% elif loop.index == 2 %}silver{% elif loop.index == 3 %}bronze{% endif %}">
+                        {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% elif loop.index == 3 %}🥉{% else %}{{ loop.index }}.{% endif %}
+                    </span>
+                    <span class="lb-name">{{ '@' + user.username if user.username else user.first_name or 'Anonymous' }}</span>
+                    <span class="lb-points">{{ user.total_earned }} pts</span>
+                    <span class="lb-wins">🏆 {{ user.wins }}</span>
+                </div>
+                {% endfor %}
+                {% if not leaderboard %}
+                <div class="leaderboard-item" style="justify-content: center; color: var(--text-secondary);">
+                    No leaderboard data yet
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Moderation -->
+        <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="stat-card">
+                <div class="icon">🚫</div>
+                <div class="value" style="color: var(--accent-red);">{{ blacklisted }}</div>
+                <div class="label">Blacklisted Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="icon">🚩</div>
+                <div class="value" style="color: var(--accent-orange);">{{ flagged }}</div>
+                <div class="label">Flagged (Unresolved)</div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p>QurachiBot &copy; 2024 — Telegram Giveaway & Contest Bot</p>
+            <p style="margin-top: 4px;">Dashboard auto-refreshes every 30 seconds</p>
+        </footer>
+    </div>
+
+    <script>
+        // Auto-refresh stats every 30 seconds
+        async function refreshStats() {
+            const indicator = document.getElementById('refreshIndicator');
+            indicator.textContent = 'Updating...';
+            indicator.classList.add('updating');
+
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+
+                document.getElementById('statGwTotal').textContent = data.giveaways.total;
+                document.getElementById('statGwActive').textContent = data.giveaways.active;
+                document.getElementById('statParticipants').textContent = data.giveaways.participants;
+                document.getElementById('statCtTotal').textContent = data.contests.total;
+                document.getElementById('statSubmissions').textContent = data.contests.submissions;
+                document.getElementById('statUsers').textContent = data.users.unique;
+                document.getElementById('statReferrals').textContent = data.users.referrals;
+            } catch (e) {
+                console.error('Failed to refresh stats:', e);
+            }
+
+            indicator.textContent = 'Auto-refresh: 30s';
+            indicator.classList.remove('updating');
+        }
+
+        setInterval(refreshStats, 30000);
+    </script>
+</body>
+</html>

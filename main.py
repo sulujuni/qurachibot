@@ -2,13 +2,24 @@
 
 import logging
 import sys
+from datetime import timedelta
 
 from telegram.ext import Application
 
 from bot.config import settings
+from bot.handlers.admin import get_admin_handlers
+from bot.handlers.alerts import get_alert_handlers
 from bot.handlers.common import get_common_handlers
 from bot.handlers.contest import get_contest_handlers
 from bot.handlers.giveaway import get_giveaway_handlers
+from bot.handlers.loyalty_handler import get_loyalty_handlers
+from bot.handlers.referral_handler import get_referral_handlers
+from bot.jobs import (
+    check_expired_giveaways,
+    check_submission_deadlines,
+    send_new_event_alerts,
+    send_reminders,
+)
 from bot.models import init_db
 
 logging.basicConfig(
@@ -19,10 +30,23 @@ logger = logging.getLogger(__name__)
 
 
 async def post_init(application: Application) -> None:
-    """Initialize the database on startup."""
+    """Initialize database and schedule jobs."""
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized successfully.")
+
+    # Schedule recurring jobs
+    job_queue = application.job_queue
+    if job_queue:
+        # Check expired giveaways every 60 seconds
+        job_queue.run_repeating(check_expired_giveaways, interval=60, first=10)
+        # Check contest submission deadlines every 60 seconds
+        job_queue.run_repeating(check_submission_deadlines, interval=60, first=15)
+        # Send ending-soon reminders every 5 minutes
+        job_queue.run_repeating(send_reminders, interval=300, first=30)
+        # Send new event alerts every 5 minutes
+        job_queue.run_repeating(send_new_event_alerts, interval=300, first=60)
+        logger.info("Scheduled jobs registered.")
 
 
 def main() -> None:
@@ -43,9 +67,18 @@ def main() -> None:
         .build()
     )
 
+    # Register all handlers
     for handler in get_giveaway_handlers():
         application.add_handler(handler)
     for handler in get_contest_handlers():
+        application.add_handler(handler)
+    for handler in get_admin_handlers():
+        application.add_handler(handler)
+    for handler in get_loyalty_handlers():
+        application.add_handler(handler)
+    for handler in get_referral_handlers():
+        application.add_handler(handler)
+    for handler in get_alert_handlers():
         application.add_handler(handler)
     for handler in get_common_handlers():
         application.add_handler(handler)

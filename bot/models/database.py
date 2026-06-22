@@ -14,6 +14,10 @@ async def init_db():
     import bot.models.giveaway  # noqa: F401
     import bot.models.contest  # noqa: F401
     import bot.models.user_settings  # noqa: F401
+    import bot.models.referral  # noqa: F401
+    import bot.models.loyalty  # noqa: F401
+    import bot.models.moderation  # noqa: F401
+    import bot.models.notification  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
