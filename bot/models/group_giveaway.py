@@ -50,6 +50,7 @@ class GroupGiveaway(Base):
     creator_username: Mapped[str] = mapped_column(String(255), nullable=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     message_id: Mapped[int] = mapped_column(BigInteger, nullable=True)  # The giveaway post message ID
+    is_channel_post: Mapped[bool] = mapped_column(Boolean, default=False)  # Posted in a channel
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
