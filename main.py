@@ -12,6 +12,7 @@ from bot.handlers.alerts import get_alert_handlers
 from bot.handlers.common import get_common_handlers
 from bot.handlers.contest import get_contest_handlers
 from bot.handlers.giveaway import get_giveaway_handlers
+from bot.handlers.group_giveaway import get_group_giveaway_handlers, _load_active_giveaways
 from bot.handlers.loyalty_handler import get_loyalty_handlers
 from bot.handlers.referral_handler import get_referral_handlers
 from bot.jobs import (
@@ -36,6 +37,10 @@ async def post_init(application: Application) -> None:
     logger.info(f"Database: {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else settings.DATABASE_URL}")
     await init_db()
     logger.info("Database initialized successfully (PostgreSQL).")
+
+    # Load active group giveaway posts into memory
+    await _load_active_giveaways()
+    logger.info("Loaded active group giveaway posts.")
 
     # Schedule recurring jobs
     job_queue = application.job_queue
@@ -81,6 +86,8 @@ def main() -> None:
     for handler in get_giveaway_handlers():
         application.add_handler(handler)
     for handler in get_contest_handlers():
+        application.add_handler(handler)
+    for handler in get_group_giveaway_handlers():
         application.add_handler(handler)
     for handler in get_admin_handlers():
         application.add_handler(handler)
