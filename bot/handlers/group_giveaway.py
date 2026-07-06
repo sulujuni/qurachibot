@@ -40,12 +40,10 @@ from bot.utils.referral import verify_pending_referrals
 # Conversation states for group giveaway creation
 GG_TITLE, GG_PRIZE, GG_MODE, GG_KEYWORD, GG_WINNERS, GG_CHANNELS, GG_DURATION = range(7)
 
-# Store active group giveaways:
-# Key: (chat_id, message_id) → giveaway_id
-# For channels: also map (discussion_group_id, forwarded_msg_id) → giveaway_id
+# In-memory cache for fast lookups. In multi-worker deployments, a miss here
+# falls through to the DB, so workers that didn't create the giveaway still
+# handle replies correctly. The cache just saves a DB hit on the common path.
 _active_giveaway_posts: dict[tuple[int, int], int] = {}
-
-# Map channel_post_id → giveaway_id (for channel comment tracking)
 _channel_post_giveaways: dict[tuple[int, int], int] = {}
 
 
@@ -54,6 +52,36 @@ def _format_name(entry) -> str:
     if entry.username:
         return f"@{entry.username}"
     return entry.first_name or f"User {entry.user_id}"
+
+
+async def _resolve_giveaway_id(chat_id: int, message_id: int) -> int | None:
+    """Look up a giveaway ID by chat_id + message_id.
+
+    Checks in-memory cache first (fast path), then falls back to the DB so
+    multi-worker deployments still work even when the cache is cold.
+    """
+    # Fast: check local cache
+    gid = _active_giveaway_posts.get((chat_id, message_id))
+    if gid:
+        return gid
+    gid = _channel_post_giveaways.get((chat_id, message_id))
+    if gid:
+        return gid
+
+    # Slow: query DB (handles multi-worker / cold cache)
+    async with async_session() as session:
+        result = await session.execute(
+            select(GroupGiveaway.id).where(
+                GroupGiveaway.chat_id == chat_id,
+                GroupGiveaway.message_id == message_id,
+                GroupGiveaway.status == GroupGiveawayStatus.ACTIVE,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            # Warm the cache for next time
+            _active_giveaway_posts[(chat_id, message_id)] = row
+        return row
 
 
 async def _load_active_giveaways():
@@ -67,7 +95,6 @@ async def _load_active_giveaways():
         )
         for gw in result.scalars().all():
             _active_giveaway_posts[(gw.chat_id, gw.message_id)] = gw.id
-            # If it's a channel post, also track by channel_id + message_id
             if gw.is_channel_post:
                 _channel_post_giveaways[(gw.chat_id, gw.message_id)] = gw.id
 
@@ -364,23 +391,23 @@ async def handle_group_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if replied:
         # Case 1: Direct reply to a giveaway post in a group
-        giveaway_id = _active_giveaway_posts.get((chat_id, replied.message_id))
+        giveaway_id = await _resolve_giveaway_id(chat_id, replied.message_id)
 
         # Case 2: Reply to a channel post forwarded to discussion group
         if not giveaway_id and replied.forward_from_chat:
             channel_id = replied.forward_from_chat.id
             forward_msg_id = replied.forward_from_message_id
             if forward_msg_id:
-                giveaway_id = _channel_post_giveaways.get((channel_id, forward_msg_id))
+                giveaway_id = await _resolve_giveaway_id(channel_id, forward_msg_id)
 
         # Case 3: The replied message itself IS the forwarded channel post
         if not giveaway_id and replied.sender_chat:
             sender_chat_id = replied.sender_chat.id
-            giveaway_id = _active_giveaway_posts.get((sender_chat_id, replied.message_id))
+            giveaway_id = await _resolve_giveaway_id(sender_chat_id, replied.message_id)
             if not giveaway_id:
                 fwd_id = replied.forward_from_message_id
                 if fwd_id:
-                    giveaway_id = _channel_post_giveaways.get((sender_chat_id, fwd_id))
+                    giveaway_id = await _resolve_giveaway_id(sender_chat_id, fwd_id)
 
     if not giveaway_id:
         return
@@ -507,7 +534,7 @@ async def handle_reaction(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     chat_id = reaction.chat.id
     message_id = reaction.message_id
-    giveaway_id = _active_giveaway_posts.get((chat_id, message_id))
+    giveaway_id = await _resolve_giveaway_id(chat_id, message_id)
     if not giveaway_id:
         return
 
