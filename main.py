@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 async def post_init(application: Application) -> None:
-    """Initialize database and schedule jobs."""
+    """Initialize database, set bot commands, and schedule jobs."""
     logger.info("Initializing database...")
     logger.info(f"Database: {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else settings.DATABASE_URL}")
     await init_db()
@@ -43,6 +43,44 @@ async def post_init(application: Application) -> None:
     # Load active group giveaway posts into memory
     await _load_active_giveaways()
     logger.info("Loaded active group giveaway posts.")
+
+    # ─── Set bot command menu (the "/" button in chats) ─────────────────────
+    from telegram import BotCommand, MenuButtonWebApp, WebAppInfo
+
+    commands = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("help", "Show all commands"),
+        BotCommand("newgiveaway", "Create a giveaway"),
+        BotCommand("newcontest", "Create a contest"),
+        BotCommand("groupgiveaway", "Group comment giveaway"),
+        BotCommand("channelgiveaway", "Channel giveaway"),
+        BotCommand("draw", "Draw giveaway winners"),
+        BotCommand("groupdraw", "Draw group giveaway winners"),
+        BotCommand("mygiveaways", "List your giveaways"),
+        BotCommand("mycontests", "List your contests"),
+        BotCommand("referral", "Get your referral link"),
+        BotCommand("points", "View loyalty points"),
+        BotCommand("leaderboard", "Top users leaderboard"),
+        BotCommand("lang", "Change language"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot command menu set (%d commands).", len(commands))
+
+    # ─── Set web dashboard menu button (opens Mini App in Telegram) ─────────
+    # Only set if WEB_URL is configured (the dashboard must be on HTTPS).
+    web_url = settings.WEB_URL
+    if web_url:
+        try:
+            menu_button = MenuButtonWebApp(
+                text="📊 Dashboard",
+                web_app=WebAppInfo(url=web_url),
+            )
+            await application.bot.set_chat_menu_button(menu_button=menu_button)
+            logger.info("Web App menu button set: %s", web_url)
+        except Exception as e:
+            logger.warning("Failed to set menu button (need HTTPS URL): %s", e)
+    else:
+        logger.info("WEB_URL not set — skipping dashboard menu button.")
 
     # Schedule recurring jobs
     job_queue = application.job_queue

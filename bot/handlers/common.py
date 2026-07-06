@@ -6,6 +6,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.i18n import SUPPORTED_LANGUAGES, get_text
+from bot.config import settings
 from bot.utils.lang import get_user_lang, set_user_lang, t
 from bot.utils.referral import parse_referral_payload, process_referral
 
@@ -89,11 +90,36 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.edit_message_text(text, parse_mode="HTML")
 
 
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show a link to the web dashboard. Command: /dashboard"""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+    web_url = settings.WEB_URL
+    if not web_url:
+        await update.message.reply_text(
+            "📊 The web dashboard is not configured yet.\n"
+            "Set <code>WEB_URL</code> in the environment to enable it.",
+            parse_mode="HTML",
+        )
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Open Dashboard", web_app=WebAppInfo(url=web_url))]
+    ])
+    await update.message.reply_text(
+        "📊 <b>QurachiBot Dashboard</b>\n\n"
+        "View live stats, leaderboard, giveaways, and contests.",
+        reply_markup=keyboard,
+        parse_mode="HTML",
+    )
+
+
 def get_common_handlers() -> list:
     """Return common command handlers."""
     return [
         CommandHandler("start", start_command),
         CommandHandler("help", help_command),
+        CommandHandler("dashboard", dashboard_command),
         CommandHandler("lang", lang_command),
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
     ]

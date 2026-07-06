@@ -20,6 +20,10 @@ class Settings:
     ])
     WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
     WEB_PORT: int = int(os.getenv("WEB_PORT", "8080"))
+    # Public HTTPS URL of the web dashboard. Set this to enable the "Dashboard"
+    # button in the Telegram chat menu. Must be HTTPS for Telegram Web Apps.
+    # Example: https://bot.yourdomain.com or your Cloudflare tunnel URL.
+    WEB_URL: str = os.getenv("WEB_URL", "")
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "")
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
