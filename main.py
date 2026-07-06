@@ -4,6 +4,7 @@ import logging
 import sys
 from datetime import timedelta
 
+from telegram import Update
 from telegram.ext import Application
 
 from bot.config import settings
@@ -17,6 +18,7 @@ from bot.handlers.loyalty_handler import get_loyalty_handlers
 from bot.handlers.referral_handler import get_referral_handlers
 from bot.jobs import (
     check_expired_giveaways,
+    check_expired_group_giveaways,
     check_submission_deadlines,
     send_new_event_alerts,
     send_reminders,
@@ -47,6 +49,8 @@ async def post_init(application: Application) -> None:
     if job_queue:
         # Check expired giveaways every 60 seconds
         job_queue.run_repeating(check_expired_giveaways, interval=60, first=10)
+        # Check expired group/channel comment giveaways every 60 seconds
+        job_queue.run_repeating(check_expired_group_giveaways, interval=60, first=20)
         # Check contest submission deadlines every 60 seconds
         job_queue.run_repeating(check_submission_deadlines, interval=60, first=15)
         # Send ending-soon reminders every 5 minutes
@@ -101,7 +105,12 @@ def main() -> None:
         application.add_handler(handler)
 
     logger.info("Bot is ready! Starting polling...")
-    application.run_polling(drop_pending_updates=True)
+    # allowed_updates must include message reactions so REACTION-mode
+    # giveaways can capture emoji reactions on posts.
+    application.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+    )
 
 
 if __name__ == "__main__":

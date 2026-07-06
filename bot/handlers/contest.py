@@ -26,7 +26,7 @@ from bot.models import (
 from bot.utils.lang import get_user_lang, t
 
 # Conversation states
-C_TITLE, C_DESCRIPTION, C_TYPE, C_PRIZE, C_MAX_SUBMISSIONS = range(5)
+C_TITLE, C_DESCRIPTION, C_TYPE, C_PRIZE, C_MAX_SUBMISSIONS, C_WINNERS = range(6)
 
 
 
@@ -105,6 +105,23 @@ async def contest_max_submissions(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text(get_text("ct_invalid_number", lang=lang))
         return C_MAX_SUBMISSIONS
 
+    context.user_data["contest_max_subs"] = max_subs
+    await update.message.reply_text(get_text("ct_create_winners", lang=lang), parse_mode="HTML")
+    return C_WINNERS
+
+
+async def contest_winner_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lang = context.user_data.get("lang", "en")
+    try:
+        winner_count = int(update.message.text.strip())
+        if winner_count < 1:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(get_text("ct_invalid_number", lang=lang))
+        return C_WINNERS
+
+    max_subs = context.user_data["contest_max_subs"]
+
     async with async_session() as session:
         contest = Contest(
             title=context.user_data["contest_title"],
@@ -112,6 +129,7 @@ async def contest_max_submissions(update: Update, context: ContextTypes.DEFAULT_
             prize=context.user_data.get("contest_prize"),
             contest_type=context.user_data["contest_type"],
             max_submissions_per_user=max_subs,
+            winner_count=winner_count,
             creator_id=update.effective_user.id,
             creator_username=update.effective_user.username,
             chat_id=update.effective_chat.id,
@@ -533,6 +551,9 @@ def get_contest_handlers() -> list:
             C_MAX_SUBMISSIONS: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, contest_max_submissions)
             ],
+            C_WINNERS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, contest_winner_count)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel_contest_creation)],
     )
@@ -546,6 +567,6 @@ def get_contest_handlers() -> list:
         CommandHandler("endcontest", end_contest),
         CommandHandler("cancelcontest", cancel_contest),
         CommandHandler("mycontests", my_contests),
-        CallbackQueryHandler(submit_contest_callback, pattern=r"^submit_contest_\\d+$"),
-        CallbackQueryHandler(view_contest_callback, pattern=r"^view_contest_\\d+$"),
+        CallbackQueryHandler(submit_contest_callback, pattern=r"^submit_contest_\d+$"),
+        CallbackQueryHandler(view_contest_callback, pattern=r"^view_contest_\d+$"),
     ]

@@ -23,6 +23,11 @@ class Settings:
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "")
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
+    # Comma-separated channels a referred user must join for the referral to count.
+    # Leave empty to only require the referred user to be a real (non-bot) account.
+    REFERRAL_REQUIRED_CHANNELS: list = field(default_factory=lambda: [
+        c.strip() for c in os.getenv("REFERRAL_REQUIRED_CHANNELS", "").split(",") if c.strip()
+    ])
 
 
 settings = Settings()

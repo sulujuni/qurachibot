@@ -3,7 +3,7 @@
 import random
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -24,9 +24,16 @@ from bot.models import (
     async_session,
 )
 from bot.utils.lang import get_user_lang, t
+from bot.utils.referral import verify_pending_referrals
+from bot.utils.subscription import (
+    build_subscription_keyboard,
+    get_unsubscribed,
+    parse_channels,
+    serialize_channels,
+)
 
 # Conversation states
-TITLE, DESCRIPTION, PRIZE, WINNER_COUNT, DURATION = range(5)
+TITLE, DESCRIPTION, PRIZE, WINNER_COUNT, CHANNELS, DURATION = range(6)
 
 
 # ─── Create Giveaway ──────────────────────────────────────────────────────────
@@ -88,6 +95,22 @@ async def giveaway_winner_count(update: Update, context: ContextTypes.DEFAULT_TY
 
     context.user_data["giveaway_winner_count"] = count
 
+    msg = get_text("gw_create_channels", lang=lang)
+    await update.message.reply_text(msg, parse_mode="HTML")
+    return CHANNELS
+
+
+async def giveaway_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive the (optional) list of channels users must subscribe to."""
+    lang = context.user_data.get("lang", "en")
+    text = update.message.text.strip()
+
+    if text.lower() == "/skip":
+        context.user_data["giveaway_channels"] = None
+    else:
+        channels = parse_channels(text)
+        context.user_data["giveaway_channels"] = serialize_channels(channels)
+
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="dur_1h"),
@@ -135,6 +158,7 @@ async def giveaway_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             description=context.user_data.get("giveaway_description"),
             prize=context.user_data["giveaway_prize"],
             winner_count=context.user_data["giveaway_winner_count"],
+            required_channels=context.user_data.get("giveaway_channels"),
             creator_id=query.from_user.id,
             creator_username=query.from_user.username,
             chat_id=query.message.chat_id,
@@ -197,10 +221,10 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
     lang = await get_user_lang(user.id)
 
     async with async_session() as session:
+        # Note: participants are NOT eagerly loaded here — at scale a giveaway
+        # can have tens of thousands of entries. We use COUNT queries instead.
         result = await session.execute(
-            select(Giveaway)
-            .options(selectinload(Giveaway.participants))
-            .where(Giveaway.id == giveaway_id)
+            select(Giveaway).where(Giveaway.id == giveaway_id)
         )
         giveaway = result.scalar_one_or_none()
 
@@ -227,6 +251,31 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.answer(get_text("gw_already_joined", lang=lang), show_alert=True)
             return
 
+        required_channels = parse_channels(giveaway.required_channels)
+
+    # Enforce channel subscription (forced-sub) before joining
+    if required_channels:
+        missing = await get_unsubscribed(context.bot, user.id, required_channels)
+        if missing:
+            await query.answer(get_text("gw_must_subscribe", lang=lang), show_alert=True)
+            keyboard = build_subscription_keyboard(
+                missing,
+                retry_callback=f"join_gw_{giveaway_id}",
+                check_label=get_text("gw_check_subscription", lang=lang),
+            )
+            try:
+                await context.bot.send_message(
+                    user.id,
+                    get_text("gw_subscribe_prompt", lang=lang, title=giveaway.title),
+                    reply_markup=keyboard,
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+            return
+
+    async with async_session() as session:
+
         # Add participant
         participant = GiveawayParticipant(
             giveaway_id=giveaway_id,
@@ -237,14 +286,21 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
         session.add(participant)
         await session.commit()
 
-        # Refresh count
-        result = await session.execute(
-            select(Giveaway)
-            .options(selectinload(Giveaway.participants))
-            .where(Giveaway.id == giveaway_id)
-        )
-        giveaway = result.scalar_one()
-        participant_count = len(giveaway.participants)
+        # Refresh giveaway + count without loading every participant row.
+        giveaway = (
+            await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
+        ).scalar_one()
+        participant_count = (
+            await session.execute(
+                select(func.count(GiveawayParticipant.id)).where(
+                    GiveawayParticipant.giveaway_id == giveaway_id
+                )
+            )
+        ).scalar()
+
+    # The user just proved channel membership by joining — credit any pending
+    # referral that was waiting on their subscription.
+    await verify_pending_referrals(context.bot, user.id)
 
     await query.answer(get_text("gw_joined", lang=lang, count=participant_count))
 
@@ -477,6 +533,10 @@ def get_giveaway_handlers() -> list:
             ],
             PRIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_prize)],
             WINNER_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_winner_count)],
+            CHANNELS: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channels),
+                CommandHandler("skip", giveaway_channels),
+            ],
             DURATION: [CallbackQueryHandler(giveaway_duration, pattern=r"^dur_")],
         },
         fallbacks=[CommandHandler("cancel", cancel_creation)],

@@ -10,9 +10,21 @@ from telegram.ext import ContextTypes
 from bot.models.database import async_session
 from bot.models.giveaway import Giveaway, GiveawayStatus, GiveawayParticipant, GiveawayWinner
 from bot.models.contest import Contest, ContestStatus
+from bot.models.group_giveaway import (
+    GroupGiveaway,
+    GroupGiveawayMode,
+    GroupGiveawayStatus,
+    GroupGiveawayWinner,
+)
 from bot.models.notification import AlertSubscription, ScheduledReminder
 
 logger = logging.getLogger(__name__)
+
+
+def _format_winner(w, index: int) -> str:
+    """Format a winner row for announcement text."""
+    name = f"@{w.username}" if w.username else (w.first_name or f"User {w.user_id}")
+    return f"🏆 {index}. {name}"
 
 
 async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -97,6 +109,103 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
                     pass  # User may have blocked the bot
 
     logger.info(f"Checked expired giveaways. Processed: {len(expired_giveaways)}")
+
+
+async def check_expired_group_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Auto-draw time-limited group/channel comment giveaways that have expired."""
+    import random
+
+    from bot.handlers.group_giveaway import _active_giveaway_posts, _channel_post_giveaways
+    from bot.i18n import get_text
+    from bot.utils.lang import get_user_lang
+    from bot.utils.loyalty import award_points
+
+    now = datetime.utcnow()
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(GroupGiveaway)
+            .options(selectinload(GroupGiveaway.entries))
+            .where(
+                GroupGiveaway.status == GroupGiveawayStatus.ACTIVE,
+                GroupGiveaway.ends_at <= now,
+                GroupGiveaway.ends_at != None,
+            )
+        )
+        expired = result.scalars().all()
+
+        for giveaway in expired:
+            valid_entries = [e for e in giveaway.entries if e.is_valid]
+
+            # Clean up in-memory tracking maps regardless of outcome
+            _active_giveaway_posts.pop((giveaway.chat_id, giveaway.message_id), None)
+            _channel_post_giveaways.pop((giveaway.chat_id, giveaway.message_id), None)
+
+            creator_lang = await get_user_lang(giveaway.creator_id)
+
+            if not valid_entries:
+                giveaway.status = GroupGiveawayStatus.CANCELLED
+                await session.commit()
+                try:
+                    await context.bot.send_message(
+                        giveaway.chat_id,
+                        get_text("gg_no_participants_expired", lang=creator_lang, title=giveaway.title),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+                continue
+
+            # FIRST_N picks earliest entries; other modes pick randomly
+            winner_count = min(giveaway.winner_count, len(valid_entries))
+            if giveaway.mode == GroupGiveawayMode.FIRST_N:
+                winners = sorted(valid_entries, key=lambda e: e.entered_at)[:winner_count]
+            else:
+                winners = random.sample(valid_entries, winner_count)
+
+            for w in winners:
+                session.add(GroupGiveawayWinner(
+                    giveaway_id=giveaway.id,
+                    user_id=w.user_id, username=w.username, first_name=w.first_name,
+                ))
+
+            giveaway.status = GroupGiveawayStatus.COMPLETED
+            giveaway.drawn_at = now
+            await session.commit()
+
+            # Award loyalty points to winners
+            for w in winners:
+                try:
+                    await award_points(w.user_id, "win_giveaway", username=w.username)
+                except Exception:
+                    pass
+
+            winners_text = "\n".join(_format_winner(w, i + 1) for i, w in enumerate(winners))
+            try:
+                await context.bot.send_message(
+                    giveaway.chat_id,
+                    get_text(
+                        "gg_results", lang=creator_lang,
+                        title=giveaway.title, prize=giveaway.prize,
+                        total=len(valid_entries), winners=winners_text,
+                    ),
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Failed to announce group giveaway {giveaway.id}: {e}")
+
+            for w in winners:
+                w_lang = await get_user_lang(w.user_id)
+                try:
+                    await context.bot.send_message(
+                        w.user_id,
+                        get_text("gg_winner_dm", lang=w_lang, title=giveaway.title, prize=giveaway.prize),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+
+    logger.info(f"Checked expired group giveaways. Processed: {len(expired)}")
 
 
 async def check_submission_deadlines(context: ContextTypes.DEFAULT_TYPE) -> None:

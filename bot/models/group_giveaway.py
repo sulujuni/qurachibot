@@ -44,6 +44,8 @@ class GroupGiveaway(Base):
     keyword: Mapped[str] = mapped_column(String(100), nullable=True)  # Required keyword in comment
     one_comment_only: Mapped[bool] = mapped_column(Boolean, default=True)  # Only first comment counts
     min_comment_length: Mapped[int] = mapped_column(Integer, default=1)  # Min characters in comment
+    # Comma-separated list of channels users must join to participate (forced-sub)
+    required_channels: Mapped[str] = mapped_column(Text, nullable=True)
 
     # Telegram message tracking
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

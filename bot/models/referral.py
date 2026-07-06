@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
@@ -22,6 +22,9 @@ class Referral(Base):
     referrer_username: Mapped[str] = mapped_column(String(255), nullable=True)
     referred_username: Mapped[str] = mapped_column(String(255), nullable=True)
     bonus_entries: Mapped[int] = mapped_column(Integer, default=1)
+    # A referral only counts once the referred user is a verified real (non-bot)
+    # account that has joined all required channels. Pending referrals stay False.
+    verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     def __repr__(self) -> str:

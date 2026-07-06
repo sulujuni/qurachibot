@@ -5,6 +5,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.i18n import SUPPORTED_LANGUAGES, get_text
 from bot.utils.lang import get_user_lang, set_user_lang, t
+from bot.utils.referral import parse_referral_payload, process_referral
 
 # Language display names
 LANG_NAMES = {
@@ -15,8 +16,26 @@ LANG_NAMES = {
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command."""
-    user_id = update.effective_user.id
+    """Handle /start command, including referral deep links."""
+    user = update.effective_user
+    user_id = user.id
+    lang = await get_user_lang(user_id)
+
+    # Process referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
+    if context.args:
+        referrer_id, giveaway_id = parse_referral_payload(context.args[0])
+        if referrer_id:
+            status = await process_referral(
+                context.bot,
+                referrer_id,
+                user,
+                giveaway_id=giveaway_id or None,
+            )
+            if status == "pending":
+                await update.message.reply_text(
+                    get_text("ref_pending", lang=lang), parse_mode="HTML"
+                )
+
     text = await t("welcome", user_id)
     await update.message.reply_text(text, parse_mode="HTML")
 

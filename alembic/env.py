@@ -22,6 +22,7 @@ import bot.models.referral  # noqa
 import bot.models.loyalty  # noqa
 import bot.models.moderation  # noqa
 import bot.models.notification  # noqa
+import bot.models.group_giveaway  # noqa
 
 from dotenv import load_dotenv
 load_dotenv()

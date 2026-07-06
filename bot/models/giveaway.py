@@ -28,6 +28,8 @@ class Giveaway(Base):
     status: Mapped[GiveawayStatus] = mapped_column(
         Enum(GiveawayStatus), default=GiveawayStatus.ACTIVE
     )
+    # Comma-separated list of channels users must join to participate (forced-sub)
+    required_channels: Mapped[str] = mapped_column(Text, nullable=True)
 
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

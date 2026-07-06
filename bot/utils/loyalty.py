@@ -62,6 +62,11 @@ async def award_points(user_id: int, reason: str, description: str = None, usern
                 first_name=first_name,
                 points=amount,
                 total_earned=amount,
+                total_spent=0,
+                giveaways_joined=0,
+                contests_joined=0,
+                wins=0,
+                referrals_made=0,
             )
             session.add(loyalty)
         else:
@@ -72,15 +77,15 @@ async def award_points(user_id: int, reason: str, description: str = None, usern
             if first_name:
                 loyalty.first_name = first_name
 
-        # Track stat
+        # Track stat (defensive: counters may be unset on a brand-new record)
         if reason == "join_giveaway":
-            loyalty.giveaways_joined += 1
+            loyalty.giveaways_joined = (loyalty.giveaways_joined or 0) + 1
         elif reason in ("join_contest", "submit_entry"):
-            loyalty.contests_joined += 1
+            loyalty.contests_joined = (loyalty.contests_joined or 0) + 1
         elif reason in ("win_giveaway", "win_contest"):
-            loyalty.wins += 1
+            loyalty.wins = (loyalty.wins or 0) + 1
         elif reason == "referral":
-            loyalty.referrals_made += 1
+            loyalty.referrals_made = (loyalty.referrals_made or 0) + 1
 
         # Log transaction
         tx = PointsTransaction(
