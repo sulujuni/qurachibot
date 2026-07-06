@@ -107,13 +107,32 @@ def main() -> None:
     for handler in get_common_handlers():
         application.add_handler(handler)
 
-    logger.info("Bot is ready! Starting polling...")
     # allowed_updates must include message reactions so REACTION-mode
     # giveaways can capture emoji reactions on posts.
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES,
-    )
+    run_kwargs = dict(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
+
+    if settings.USE_WEBHOOK:
+        if not settings.WEBHOOK_URL:
+            logger.error("USE_WEBHOOK=true but WEBHOOK_URL is not set. Aborting.")
+            sys.exit(1)
+        webhook_url = f"{settings.WEBHOOK_URL.rstrip('/')}/{settings.WEBHOOK_PATH}"
+        logger.info(
+            "Bot is ready! Starting webhook server on %s:%s (public: %s)",
+            settings.WEBHOOK_LISTEN, settings.WEBHOOK_PORT, webhook_url,
+        )
+        # PTB runs its own lightweight HTTPS-less server here and calls
+        # setWebhook for you. Terminate TLS at your reverse proxy in front.
+        application.run_webhook(
+            listen=settings.WEBHOOK_LISTEN,
+            port=settings.WEBHOOK_PORT,
+            url_path=settings.WEBHOOK_PATH,
+            webhook_url=webhook_url,
+            secret_token=settings.WEBHOOK_SECRET_TOKEN or None,
+            **run_kwargs,
+        )
+    else:
+        logger.info("Bot is ready! Starting polling...")
+        application.run_polling(**run_kwargs)
 
 
 if __name__ == "__main__":

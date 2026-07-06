@@ -33,5 +33,21 @@ class Settings:
         c.strip() for c in os.getenv("REFERRAL_REQUIRED_CHANNELS", "").split(",") if c.strip()
     ])
 
+    # ─── Webhook mode (self-hosted; alternative to polling) ──────────────────
+    # Polling is fine for dev/small bots. For production/scale, run behind your
+    # own HTTPS reverse proxy (Caddy/nginx + free Let's Encrypt cert) — no paid
+    # webhook service needed.
+    USE_WEBHOOK: bool = os.getenv("USE_WEBHOOK", "false").lower() in ("1", "true", "yes")
+    # Public HTTPS base URL Telegram will call, e.g. https://bot.example.com
+    WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "")
+    # Interface/port the bot's internal webhook server listens on (behind the proxy).
+    WEBHOOK_LISTEN: str = os.getenv("WEBHOOK_LISTEN", "0.0.0.0")
+    WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "8443"))
+    # URL path segment appended to WEBHOOK_URL (keep it hard-to-guess).
+    WEBHOOK_PATH: str = os.getenv("WEBHOOK_PATH", "telegram")
+    # Optional shared secret; Telegram echoes it in a header so you can reject
+    # any request that didn't come from Telegram. Highly recommended.
+    WEBHOOK_SECRET_TOKEN: str = os.getenv("WEBHOOK_SECRET_TOKEN", "")
+
 
 settings = Settings()
