@@ -1,11 +1,15 @@
 """Common bot handlers (start, help, language selection)."""
 
+import logging
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.i18n import SUPPORTED_LANGUAGES, get_text
 from bot.utils.lang import get_user_lang, set_user_lang, t
 from bot.utils.referral import parse_referral_payload, process_referral
+
+logger = logging.getLogger(__name__)
 
 # Language display names
 LANG_NAMES = {
@@ -16,28 +20,35 @@ LANG_NAMES = {
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command, including referral deep links."""
+    """Handle /start command, including referral deep links.
+
+    Optimized for bursts (e.g. a referral konkurs sending thousands of /start
+    at once): the welcome reply is sent immediately, and referral bookkeeping
+    is done afterwards with the network membership check deferred, so /start
+    never makes a per-user Telegram API call and never fails on referral errors.
+    """
     user = update.effective_user
     user_id = user.id
-    lang = await get_user_lang(user_id)
 
-    # Process referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
+    # Always respond first so users get instant feedback, even under heavy load.
+    text = await t("welcome", user_id)
+    await update.message.reply_text(text, parse_mode="HTML")
+
+    # Referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
+    # Recorded with verify_subscription=False → pure DB, no Telegram call here.
     if context.args:
         referrer_id, giveaway_id = parse_referral_payload(context.args[0])
         if referrer_id:
-            status = await process_referral(
-                context.bot,
-                referrer_id,
-                user,
-                giveaway_id=giveaway_id or None,
-            )
-            if status == "pending":
-                await update.message.reply_text(
-                    get_text("ref_pending", lang=lang), parse_mode="HTML"
+            try:
+                await process_referral(
+                    context.bot,
+                    referrer_id,
+                    user,
+                    giveaway_id=giveaway_id or None,
+                    verify_subscription=False,
                 )
-
-    text = await t("welcome", user_id)
-    await update.message.reply_text(text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning("Referral processing failed for %s: %s", user_id, e)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

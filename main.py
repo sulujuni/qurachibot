@@ -81,6 +81,9 @@ def main() -> None:
     application = (
         Application.builder()
         .token(settings.BOT_TOKEN)
+        # Process updates concurrently instead of one-at-a-time, so a spike of
+        # thousands of /start (e.g. a referral konkurs) is drained quickly.
+        .concurrent_updates(settings.MAX_CONCURRENT_UPDATES)
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()

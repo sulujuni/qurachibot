@@ -60,6 +60,7 @@ async def process_referral(
     referrer_id: int,
     referred_user,
     giveaway_id: int | None = None,
+    verify_subscription: bool = True,
 ) -> str:
     """Validate and record a referral from a /start deep link.
 
@@ -70,6 +71,12 @@ async def process_referral(
       • The referral only becomes *verified* (and awards points) once the
         referred user is subscribed to all required channels. Until then it
         is stored as pending and can be verified later.
+
+    ``verify_subscription`` controls whether the (network) channel-membership
+    check runs now. On the /start hot path it is set to False so a burst of
+    thousands of joins never makes a Telegram API call per user — those
+    referrals are stored as *pending* and get verified later, cheaply, when
+    the user actually joins a giveaway (see ``verify_pending_referrals``).
 
     Returns one of: "bot", "self", "already", "verified", "pending".
     """
@@ -82,10 +89,15 @@ async def process_referral(
         return "self"
 
     required_channels = await _required_channels_for(giveaway_id)
-    is_subscribed = True
-    if required_channels:
+    if not required_channels:
+        # Nothing to be subscribed to → a real, non-bot user counts immediately.
+        is_subscribed = True
+    elif verify_subscription:
         missing = await get_unsubscribed(bot, referred_id, required_channels)
         is_subscribed = not missing
+    else:
+        # Defer the network check; record as pending and verify on join.
+        is_subscribed = False
 
     async with async_session() as session:
         result = await session.execute(

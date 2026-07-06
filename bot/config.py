@@ -23,6 +23,10 @@ class Settings:
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "")
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
+    # Max updates processed concurrently. Removes the default sequential
+    # bottleneck so a burst (e.g. thousands of /start at once) drains quickly.
+    # Keep this in a sensible ratio to the DB pool (POOL_SIZE + MAX_OVERFLOW).
+    MAX_CONCURRENT_UPDATES: int = int(os.getenv("MAX_CONCURRENT_UPDATES", "256"))
     # Comma-separated channels a referred user must join for the referral to count.
     # Leave empty to only require the referred user to be a real (non-bot) account.
     REFERRAL_REQUIRED_CHANNELS: list = field(default_factory=lambda: [
