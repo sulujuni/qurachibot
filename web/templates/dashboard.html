@@ -13,7 +13,12 @@
     <div class="container">
         <header class="header">
             <h1>QurachiBot Dashboard</h1>
-            <p>Giveaway & Contest Bot — Live Statistics</p>
+            <p>Giveaway &amp; Contest Bot — Live Statistics</p>
+            <p style="margin-top: 8px; color: var(--text-secondary); font-size: 0.95rem; max-width: 640px; margin-left: auto; margin-right: auto;">
+                Qurachi (from Uzbek <em>qur'a tashlovchi</em> — "the one who draws lots")
+                runs prize draws and contests in Telegram groups and channels,
+                with random winner selection, forced-subscription checks, and referrals.
+            </p>
         </header>
 
         <!-- Stats Overview -->
@@ -63,6 +68,9 @@
         <!-- Recent Giveaways -->
         <div class="section">
             <h2 class="section-title">🎉 Recent Giveaways</h2>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: -8px 0 16px;">
+                Prize draws where users join with one tap (or a comment/reaction) and winners are picked randomly.
+            </p>
             <div class="table-wrapper">
                 <table>
                     <thead>
@@ -105,6 +113,9 @@
         <!-- Recent Contests -->
         <div class="section">
             <h2 class="section-title">🏅 Recent Contests</h2>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: -8px 0 16px;">
+                Competitions where users submit entries (text or photo) and the community votes for the winners.
+            </p>
             <div class="table-wrapper">
                 <table>
                     <thead>
@@ -149,6 +160,9 @@
         <!-- Leaderboard -->
         <div class="section">
             <h2 class="section-title">🏆 Leaderboard — Top 10</h2>
+            <p style="color: var(--text-secondary); font-size: 0.9rem; margin: -8px 0 16px;">
+                Most active users, ranked by loyalty points earned from joining, voting, and referring friends.
+            </p>
             <div class="table-wrapper">
                 {% for user in leaderboard %}
                 <div class="leaderboard-item">

@@ -44,27 +44,66 @@ async def post_init(application: Application) -> None:
     await _load_active_giveaways()
     logger.info("Loaded active group giveaway posts.")
 
-    # ─── Set bot command menu (the "/" button in chats) ─────────────────────
+    # ─── Set bot command menu (the "/" button in chats), per language ───────
     from telegram import BotCommand, MenuButtonWebApp, WebAppInfo
 
-    commands = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("help", "Show all commands"),
-        BotCommand("newgiveaway", "Create a giveaway"),
-        BotCommand("newcontest", "Create a contest"),
-        BotCommand("groupgiveaway", "Group comment giveaway"),
-        BotCommand("channelgiveaway", "Channel giveaway"),
-        BotCommand("draw", "Draw giveaway winners"),
-        BotCommand("groupdraw", "Draw group giveaway winners"),
-        BotCommand("mygiveaways", "List your giveaways"),
-        BotCommand("mycontests", "List your contests"),
-        BotCommand("referral", "Get your referral link"),
-        BotCommand("points", "View loyalty points"),
-        BotCommand("leaderboard", "Top users leaderboard"),
-        BotCommand("lang", "Change language"),
-    ]
-    await application.bot.set_my_commands(commands)
-    logger.info("Bot command menu set (%d commands).", len(commands))
+    command_sets = {
+        # Default (English) — shown to any language without a specific set
+        None: [
+            BotCommand("start", "Start the bot"),
+            BotCommand("help", "List of all commands"),
+            BotCommand("newgiveaway", "Create a giveaway (prize draw)"),
+            BotCommand("newcontest", "Create a contest"),
+            BotCommand("groupgiveaway", "Comment-to-enter giveaway in a group"),
+            BotCommand("channelgiveaway", "Giveaway for a channel"),
+            BotCommand("draw", "Draw giveaway winners"),
+            BotCommand("groupdraw", "Draw group giveaway winners"),
+            BotCommand("mygiveaways", "Your giveaways"),
+            BotCommand("mycontests", "Your contests"),
+            BotCommand("referral", "Your invite link & stats"),
+            BotCommand("points", "View your loyalty points"),
+            BotCommand("leaderboard", "Top users"),
+            BotCommand("lang", "Change language"),
+        ],
+        "ru": [
+            BotCommand("start", "Запустить бота"),
+            BotCommand("help", "Список всех команд"),
+            BotCommand("newgiveaway", "Создать розыгрыш"),
+            BotCommand("newcontest", "Создать конкурс"),
+            BotCommand("groupgiveaway", "Розыгрыш по комментариям в группе"),
+            BotCommand("channelgiveaway", "Розыгрыш для канала"),
+            BotCommand("draw", "Определить победителей розыгрыша"),
+            BotCommand("groupdraw", "Определить победителей в группе"),
+            BotCommand("mygiveaways", "Мои розыгрыши"),
+            BotCommand("mycontests", "Мои конкурсы"),
+            BotCommand("referral", "Реферальная ссылка и статистика"),
+            BotCommand("points", "Ваши баллы"),
+            BotCommand("leaderboard", "Рейтинг пользователей"),
+            BotCommand("lang", "Сменить язык"),
+        ],
+        "uz": [
+            BotCommand("start", "Botni ishga tushirish"),
+            BotCommand("help", "Barcha buyruqlar ro'yxati"),
+            BotCommand("newgiveaway", "Yutuqli o'yin (sovg'a o'ynatish)"),
+            BotCommand("newcontest", "Konkurs yaratish"),
+            BotCommand("groupgiveaway", "Guruhda izohli yutuqli o'yin"),
+            BotCommand("channelgiveaway", "Kanal uchun yutuqli o'yin"),
+            BotCommand("draw", "Yutuqli o'yin g'oliblarini aniqlash"),
+            BotCommand("groupdraw", "Guruh o'yini g'oliblarini aniqlash"),
+            BotCommand("mygiveaways", "Mening yutuqli o'yinlarim"),
+            BotCommand("mycontests", "Mening konkurslarim"),
+            BotCommand("referral", "Do'st taklif qilish havolasi"),
+            BotCommand("points", "Ballaringizni ko'rish"),
+            BotCommand("leaderboard", "Eng faol foydalanuvchilar"),
+            BotCommand("lang", "Tilni o'zgartirish"),
+        ],
+    }
+    for lang_code, cmds in command_sets.items():
+        if lang_code:
+            await application.bot.set_my_commands(cmds, language_code=lang_code)
+        else:
+            await application.bot.set_my_commands(cmds)
+    logger.info("Bot command menus set for %d languages.", len(command_sets))
 
     # ─── Set web dashboard menu button (opens Mini App in Telegram) ─────────
     # Only set if WEB_URL is configured (the dashboard must be on HTTPS).
