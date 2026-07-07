@@ -924,7 +924,7 @@ async function renderProfile() {
         html += `<div class="card">
             <div class="card-title">🚪 Join so'rovlarini boshqarish</div>
             <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">
-                Yopiq kanal/guruhga qo'shilish so'rovlarini avtomatik qabul/rad qilish.
+                Yopiq kanal/guruhga qo'shilish so'rovlarini avtomatik boshqarish.
                 Bot kanalda <b>admin</b> bo'lishi shart.
             </p>`;
 
@@ -949,24 +949,45 @@ async function renderProfile() {
                     <button class="chip" onclick="changeFilterMode('${f.chat_id}')" style="font-size:11px;">⚙️</button>
                 </div>`;
             });
-        } else {
-            html += `<div class="empty-state" style="padding:20px;">
-                <div class="emoji">🚪</div>
-                <p>Hali sozlanmagan.<br><br>
-                <b>Qanday sozlash:</b><br>
-                1. Botni kanalga admin qiling<br>
-                2. Kanalda yozing: <code>/joinfilter all</code><br><br>
-                <b>Mavjud rejimlar:</b><br>
-                <code>all</code> — hammani qabul qilish<br>
-                <code>no_bots</code> — botlarni rad etish<br>
-                <code>females</code> — faqat ayollar<br>
-                <code>males</code> — faqat erkaklar<br>
-                <code>subscribed @ch1,@ch2</code> — obuna shart<br>
-                <code>started</code> — botni ishga tushirganlar<br>
-                <code>off</code> — o'chirish</p>
-            </div>`;
         }
+
+        // Add new filter form
+        html += `
+            <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+                <b style="font-size:13px;">➕ Yangi filter qo'shish</b>
+                <div class="form-group" style="margin-top:10px;">
+                    <label class="form-label">Kanal/guruh ID yoki @username</label>
+                    <input class="form-input" id="jfChatId" placeholder="masalan: @your_channel yoki -1001234567890">
+                    <div class="form-hint">Kanalning @username si yoki raqamli ID si</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Rejim</label>
+                    <select class="form-select" id="jfMode">
+                        <option value="all">✅ Hammani qabul qilish</option>
+                        <option value="no_bots">🤖❌ Botlarni rad etish</option>
+                        <option value="females">👩 Faqat ayollar</option>
+                        <option value="males">👨 Faqat erkaklar</option>
+                        <option value="subscribed">📢 Kanalga obuna bo'lganlar</option>
+                        <option value="started">🤖 Botni ishga tushirganlar</option>
+                        <option value="off">⏸ O'chirish</option>
+                    </select>
+                </div>
+                <div class="form-group" id="jfChannelsGroup" style="display:none;">
+                    <label class="form-label">Obuna shart kanallar</label>
+                    <input class="form-input" id="jfChannels" placeholder="@channel1, @channel2">
+                </div>
+                <button class="btn btn-primary" onclick="addJoinFilter()">💾 Saqlash</button>
+            </div>`;
         html += `</div>`;
+
+        // Add listener to show channels field when 'subscribed' mode selected
+        setTimeout(() => {
+            const sel = document.getElementById('jfMode');
+            const chGroup = document.getElementById('jfChannelsGroup');
+            if (sel && chGroup) {
+                sel.onchange = () => { chGroup.style.display = sel.value === 'subscribed' ? 'block' : 'none'; };
+            }
+        }, 50);
     }
 
     el.innerHTML = html;
@@ -1015,6 +1036,30 @@ async function changeLang(newLang) {
         showToast('Xatolik yuz berdi', 'error');
         console.error('setLang error:', e);
     }
+}
+
+async function changeFilterMode(chatId) {
+    // Scroll to the add form and pre-fill the chat_id
+    const input = document.getElementById('jfChatId');
+    if (input) {
+        input.value = chatId;
+        input.scrollIntoView({behavior: 'smooth'});
+        showToast('👇 Rejimni tanlang va saqlang');
+    }
+}
+
+async function addJoinFilter() {
+    const chatId = document.getElementById('jfChatId').value.trim();
+    const mode = document.getElementById('jfMode').value;
+    const channels = document.getElementById('jfChannels')?.value.trim() || null;
+
+    if (!chatId) { showToast("Kanal ID yoki @username kiriting!", 'error'); return; }
+
+    const res = await api('/join-filter/set', 'POST', {chat_id: chatId, mode, channels});
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast('✅ Filter saqlandi!');
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    renderProfile();
 }
 
 async function changeFilterMode(chatId) {
