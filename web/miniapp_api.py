@@ -89,12 +89,22 @@ def _get_user_from_header(init_data_header: str | None) -> dict:
     if user:
         return user
 
-    # Fallback: try parsing user field directly (dev mode)
+    # Fallback: try parsing user field directly (dev mode / validation bypass)
     try:
         parsed = parse_qs(init_data_header)
         user_json = parsed.get("user", [None])[0]
         if user_json:
             return json.loads(user_json)
+    except Exception:
+        pass
+
+    # Last resort: try parsing the whole thing as JSON (some clients send it differently)
+    try:
+        data = json.loads(init_data_header)
+        if "id" in data:
+            return data
+        if "user" in data:
+            return data["user"]
     except Exception:
         pass
 

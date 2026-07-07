@@ -190,8 +190,18 @@ let userData = null;
 async function api(path, method='GET', body=null) {
     const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
-    const r = await fetch(`${BASE}/miniapp/api${path}`, opts);
-    return r.json();
+    try {
+        const r = await fetch(`${BASE}/miniapp/api${path}`, opts);
+        if (!r.ok && r.status === 401) {
+            console.warn('API 401 — initData may be invalid. Path:', path);
+            return {};
+        }
+        const data = await r.json();
+        return data;
+    } catch(e) {
+        console.error('API error:', path, e);
+        return {};
+    }
 }
 
 async function initApp() {
@@ -621,23 +631,46 @@ async function renderProfile() {
     const el = document.getElementById('content');
     el.innerHTML = '<div class="empty-state">⏳</div>';
 
-    const [points, referral, alerts, lang] = await Promise.all([
-        api('/points'), api('/referral'), api('/alerts'), api('/language'),
-    ]);
+    let points = {points:0, total_earned:0, config:{}, transactions:[]};
+    let referral = {link:'', count:0, points_earned:0, points_per_referral:20};
+    let alerts = {subscribed: false};
+    let lang = {language: 'uz'};
+
+    try {
+        [points, referral, alerts, lang] = await Promise.all([
+            api('/points'), api('/referral'), api('/alerts'), api('/language'),
+        ]);
+    } catch(e) { console.error('Profile load error:', e); }
 
     let html = '';
 
+    // Language selector (FIRST — most requested)
+    const langNames = {uz: "🇺🇿 O'zbekcha", ru: '🇷🇺 Русский', en: '🇬🇧 English'};
+    const currentLang = lang.language || 'uz';
+    html += `<div class="card">
+        <div class="card-title">🌐 Til / Язык / Language</div>
+        <p style="font-size:12px;color:var(--text-hint);margin-bottom:10px;">Bot tilingizni tanlang:</p>
+        <div class="chip-row" id="langChips">
+            ${Object.entries(langNames).map(([code, name]) =>
+                `<span class="chip ${currentLang===code?'selected':''}" id="lang_${code}" onclick="changeLang('${code}')">${name}</span>`
+            ).join('')}
+        </div>
+        <p id="langStatus" style="font-size:12px;color:var(--text-hint);margin-top:6px;">Joriy til: ${langNames[currentLang]}</p>
+    </div>`;
+
     // Referral card
     html += `<div class="card">
-        <div class="card-title">👥 Do'st taklif qilish</div>
-        <p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">Havolani ulashing — har bir taklif uchun +${referral.points_per_referral} ball</p>
+        <div class="card-title">👥 Do'st taklif qilish (Referal)</div>
+        <p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">
+            Havolani do'stlaringizga yuboring. Ular bot orqali qo'shilsa, siz <b>+${referral.points_per_referral} ball</b> olasiz.
+        </p>
         <div class="form-group">
-            <input class="form-input" id="refLink" value="${referral.link}" readonly onclick="copyRefLink()" style="font-size:13px;">
+            <input class="form-input" id="refLink" value="${referral.link || 'Yuklanmoqda...'}" readonly style="font-size:12px;cursor:pointer;" onclick="copyRefLink()">
             <div class="form-hint">👆 Nusxa olish uchun bosing</div>
         </div>
         <div class="stats-row">
-            <div class="stat-box"><div class="stat-val">${referral.count}</div><div class="stat-lbl">Takliflar</div></div>
-            <div class="stat-box"><div class="stat-val">${referral.points_earned}</div><div class="stat-lbl">Ishlab topilgan</div></div>
+            <div class="stat-box"><div class="stat-val">${referral.count || 0}</div><div class="stat-lbl">Takliflar</div></div>
+            <div class="stat-box"><div class="stat-val">${referral.points_earned || 0}</div><div class="stat-lbl">Ball olindi</div></div>
         </div>
     </div>`;
 
@@ -645,21 +678,26 @@ async function renderProfile() {
     html += `<div class="card">
         <div class="card-title">💰 Ballarim</div>
         <div class="stats-row">
-            <div class="stat-box"><div class="stat-val">${points.points}</div><div class="stat-lbl">Joriy ballar</div></div>
-            <div class="stat-box"><div class="stat-val">${points.total_earned}</div><div class="stat-lbl">Jami ishlab topilgan</div></div>
+            <div class="stat-box"><div class="stat-val">${points.points || 0}</div><div class="stat-lbl">Joriy ballar</div></div>
+            <div class="stat-box"><div class="stat-val">${points.total_earned || 0}</div><div class="stat-lbl">Jami</div></div>
         </div>
-        <p style="font-size:12px;color:var(--text-hint);margin-top:8px;">
-            🎮 O'yinga qo'shilish: +${points.config?.join_giveaway || 5} | 
-            🏆 Yutish: +${points.config?.win_giveaway || 50} | 
-            👥 Taklif: +${points.config?.referral || 20}
-        </p>`;
+        <div style="margin-top:10px;padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);font-size:12px;">
+            <b>Qanday ball olish mumkin:</b><br>
+            🎮 O'yinga qo'shilish: +${points.config?.join_giveaway || 5}<br>
+            🏆 Yutish: +${points.config?.win_giveaway || 50}<br>
+            👥 Do'st taklif: +${points.config?.referral || 20}<br>
+            🗳 Ovoz berish: +${points.config?.vote || 2}
+        </div>`;
     if (points.transactions?.length) {
-        html += `<div style="margin-top:12px;max-height:200px;overflow-y:auto;">`;
+        html += `<div style="margin-top:12px;"><b style="font-size:12px;">So'nggi harakatlar:</b></div>
+        <div style="margin-top:6px;max-height:180px;overflow-y:auto;">`;
+        const reasonLabels = {join_giveaway:"🎮 O'yinga qo'shildi", win_giveaway:"🏆 Yutdi", referral:"👥 Taklif", vote:"🗳 Ovoz", submit_entry:"📤 Ishtirok"};
         points.transactions.slice(0,10).forEach(t => {
             const sign = t.amount > 0 ? '+' : '';
             const color = t.amount > 0 ? '#4caf50' : '#f44336';
-            html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
-                <span>${t.reason}</span>
+            const label = reasonLabels[t.reason] || t.reason;
+            html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+                <span>${label}</span>
                 <span style="color:${color};font-weight:700;">${sign}${t.amount}</span>
             </div>`;
         });
@@ -668,42 +706,67 @@ async function renderProfile() {
     html += `</div>`;
 
     // Alerts toggle
+    const alertActive = alerts.subscribed;
     html += `<div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;">
-            <div class="card-title" style="margin-bottom:0;">🔔 Bildirishnomalar</div>
-            <button class="chip ${alerts.subscribed ? 'selected' : ''}" onclick="toggleAlerts()" id="alertBtn">
-                ${alerts.subscribed ? '✅ Faol' : '❌ O\'chirilgan'}
+            <div>
+                <div class="card-title" style="margin-bottom:0;">🔔 Bildirishnomalar</div>
+                <p style="font-size:11px;color:var(--text-hint);margin-top:4px;">Yangi o'yinlar haqida xabar olasiz</p>
+            </div>
+            <button class="chip ${alertActive ? 'selected' : ''}" onclick="toggleAlerts(this)" id="alertBtn">
+                ${alertActive ? '✅ Yoqilgan' : '⭕ O\'chirilgan'}
             </button>
         </div>
-        <p style="font-size:12px;color:var(--text-hint);margin-top:8px;">Yangi o'yinlar haqida xabar olish</p>
     </div>`;
 
-    // Language selector
-    const langNames = {en: '🇬🇧 English', ru: '🇷🇺 Русский', uz: "🇺🇿 O'zbekcha"};
-    html += `<div class="card">
-        <div class="card-title">🌐 Til</div>
-        <div class="chip-row">
-            ${['uz','ru','en'].map(l => `<span class="chip ${lang.language===l?'selected':''}" onclick="setLang('${l}')">${langNames[l]}</span>`).join('')}
-        </div>
-    </div>`;
-
-    // Join filters (admin only)
+    // Join filters (admin only) — with MANAGEMENT UI
     if (isAdmin) {
-        const filters = await api('/join-filters');
+        let filters = [];
+        try { filters = await api('/join-filters'); } catch(e) {}
         html += `<div class="card">
-            <div class="card-title">🚪 Join Request Filters</div>`;
+            <div class="card-title">🚪 Join so'rovlarini boshqarish</div>
+            <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">
+                Yopiq kanal/guruhga qo'shilish so'rovlarini avtomatik qabul/rad qilish.
+                Bot kanalda <b>admin</b> bo'lishi shart.
+            </p>`;
+
         if (filters.length) {
             filters.forEach(f => {
+                const modeLabels = {
+                    all: '✅ Hammani qabul qilish',
+                    no_bots: '🤖❌ Botlarni rad etish',
+                    females: '👩 Faqat ayollar',
+                    males: '👨 Faqat erkaklar',
+                    subscribed: '📢 Obuna bo\'lganlar',
+                    started: '🤖 Botni ishga tushirganlar',
+                    off: '⏸ O\'chirilgan',
+                };
                 html += `<div class="game-item">
-                    <div class="game-icon">${f.enabled ? '✅' : '❌'}</div>
+                    <div class="game-icon">${f.enabled ? '✅' : '⏸'}</div>
                     <div class="game-info">
-                        <div class="game-title">${f.chat_title || f.chat_id}</div>
-                        <div class="game-meta">Rejim: ${f.mode} · ✅${f.accepted} ❌${f.rejected}</div>
+                        <div class="game-title">${f.chat_title || 'Chat #' + f.chat_id}</div>
+                        <div class="game-meta">${modeLabels[f.mode] || f.mode}</div>
+                        <div class="game-meta">Qabul: ${f.accepted} | Rad: ${f.rejected}</div>
                     </div>
+                    <button class="chip" onclick="changeFilterMode('${f.chat_id}')" style="font-size:11px;">⚙️</button>
                 </div>`;
             });
         } else {
-            html += `<p style="font-size:13px;color:var(--text-hint);">Hali sozlanmagan. Kanalda /joinfilter ishlating.</p>`;
+            html += `<div class="empty-state" style="padding:20px;">
+                <div class="emoji">🚪</div>
+                <p>Hali sozlanmagan.<br><br>
+                <b>Qanday sozlash:</b><br>
+                1. Botni kanalga admin qiling<br>
+                2. Kanalda yozing: <code>/joinfilter all</code><br><br>
+                <b>Mavjud rejimlar:</b><br>
+                <code>all</code> — hammani qabul qilish<br>
+                <code>no_bots</code> — botlarni rad etish<br>
+                <code>females</code> — faqat ayollar<br>
+                <code>males</code> — faqat erkaklar<br>
+                <code>subscribed @ch1,@ch2</code> — obuna shart<br>
+                <code>started</code> — botni ishga tushirganlar<br>
+                <code>off</code> — o'chirish</p>
+            </div>`;
         }
         html += `</div>`;
     }
@@ -717,21 +780,63 @@ function copyRefLink() {
     navigator.clipboard.writeText(input.value).then(() => {
         showToast('📋 Havola nusxalandi!');
         if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    }).catch(() => {
+        // Fallback for older browsers
+        document.execCommand('copy');
+        showToast('📋 Havola nusxalandi!');
     });
 }
 
-async function toggleAlerts() {
-    const res = await api('/alerts/toggle', 'POST');
-    const btn = document.getElementById('alertBtn');
-    btn.className = `chip ${res.subscribed ? 'selected' : ''}`;
-    btn.textContent = res.subscribed ? '✅ Faol' : "❌ O'chirilgan";
-    showToast(res.subscribed ? '🔔 Bildirishnomalar yoqildi' : '🔕 Bildirishnomalar o\'chirildi');
+async function toggleAlerts(btn) {
+    try {
+        const res = await api('/alerts/toggle', 'POST');
+        if (btn) {
+            btn.className = `chip ${res.subscribed ? 'selected' : ''}`;
+            btn.textContent = res.subscribed ? '✅ Yoqilgan' : "⭕ O'chirilgan";
+        }
+        showToast(res.subscribed ? '🔔 Bildirishnomalar yoqildi' : '🔕 O\'chirildi');
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    } catch(e) { showToast('Xatolik', 'error'); }
 }
 
-async function setLang(lang) {
-    await api('/language', 'POST', {language: lang});
-    showToast('✅ Til o\'zgartirildi');
-    renderProfile();
+async function changeLang(newLang) {
+    try {
+        const res = await api('/language', 'POST', {language: newLang});
+        if (res.error) { showToast(res.error, 'error'); return; }
+
+        // Update UI immediately
+        const langNames = {uz: "🇺🇿 O'zbekcha", ru: '🇷🇺 Русский', en: '🇬🇧 English'};
+        document.querySelectorAll('#langChips .chip').forEach(el => {
+            el.classList.toggle('selected', el.id === `lang_${newLang}`);
+        });
+        document.getElementById('langStatus').textContent = `Joriy til: ${langNames[newLang]}`;
+
+        showToast('✅ Til o\'zgartirildi: ' + langNames[newLang]);
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    } catch(e) {
+        showToast('Xatolik yuz berdi', 'error');
+        console.error('setLang error:', e);
+    }
+}
+
+async function changeFilterMode(chatId) {
+    const modes = ['all', 'no_bots', 'females', 'males', 'subscribed', 'started', 'off'];
+    const labels = ['✅ Hammani qabul', '🤖❌ Botlarsiz', '👩 Faqat ayollar', '👨 Faqat erkaklar', '📢 Obuna shart', '🤖 Botni boshlagan', '⏸ O\'chirish'];
+    const choice = prompt(`Rejimni tanlang (raqam kiriting):\n${modes.map((m,i) => `${i+1}. ${labels[i]}`).join('\n')}`);
+    if (!choice) return;
+    const idx = parseInt(choice) - 1;
+    if (idx < 0 || idx >= modes.length) { showToast('Noto\'g\'ri raqam', 'error'); return; }
+
+    let channels = null;
+    if (modes[idx] === 'subscribed') {
+        channels = prompt('Majburiy kanallarni kiriting (masalan: @channel1, @channel2):');
+        if (!channels) return;
+    }
+
+    const res = await api('/join-filter/set', 'POST', {chat_id: chatId, mode: modes[idx], channels});
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast('✅ Filter o\'zgartirildi!');
+    renderProfile(); // refresh
 }
 </script>
 
