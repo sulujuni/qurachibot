@@ -186,6 +186,107 @@ const headers = { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg
 
 let isAdmin = false;
 let userData = null;
+let currentLang = 'uz';
+
+// ─── Mini App translations ──────────────────────────────────────
+const T = {
+    uz: {
+        home: 'Bosh sahifa', games: "O'yinlarim", leaders: 'Reyting', create: 'Yaratish', profile: 'Profil', admin: 'Admin',
+        my_points: 'Ballarim', my_wins: 'Yutganlarim', participated: 'Qatnashganlarim', created: 'Yaratganlarim',
+        active_giveaways: "Faol yutuqli o'yinlar", active_contests: 'Faol konkurslar',
+        no_active_gw: "Hozircha faol o'yinlar yo'q", no_active_ct: "Hozircha faol konkurslar yo'q",
+        active: 'Faol', ended: 'Tugagan', won: 'Yutdim', accepting: 'Qabul qilmoqda', voting: 'Ovoz berish',
+        no_limit: 'Chegarasiz', left: 'qoldi',
+        participated_games: "Qatnashgan o'yinlarim", created_games: "Yaratgan o'yinlarim",
+        no_participated: "Siz hali biror o'yinda qatnashmagansiz", no_created: "Siz hali o'yin yaratmagansiz",
+        referral_title: "Do'st taklif qilish (Referal)", referral_desc: "Havolani ulashing — har bir taklif uchun",
+        copy_hint: "Nusxa olish uchun bosing", invites: 'Takliflar', earned: 'Ball olindi',
+        points_title: 'Ballarim', current_points: 'Joriy ballar', total: 'Jami',
+        how_earn: 'Qanday ball olish mumkin:', join_game: "O'yinga qo'shilish", win: 'Yutish', invite_friend: "Do'st taklif", vote_action: 'Ovoz berish',
+        recent_actions: "So'nggi harakatlar",
+        alerts_title: 'Bildirishnomalar', alerts_desc: "Yangi o'yinlar haqida xabar olasiz",
+        alerts_on: 'Yoqilgan', alerts_off: "O'chirilgan",
+        lang_title: 'Til / Язык / Language', lang_desc: 'Bot tilingizni tanlang:',
+        current_lang: 'Joriy til',
+        join_filter_title: "Join so'rovlarini boshqarish",
+        join_filter_desc: "Yopiq kanal/guruhga qo'shilish so'rovlarini avtomatik boshqarish.",
+        add_filter: "Yangi filter qo'shish", save: 'Saqlash',
+        channel_input: "Kanal/guruh ID yoki @username", mode: 'Rejim',
+        sub_channels: "Obuna shart kanallar",
+        leaderboard_title: "Eng faol foydalanuvchilar", no_leaderboard: "Hali reyting ma'lumotlari yo'q",
+        pts: 'ball',
+        create_title: "Yangi o'yin yaratish", create_desc: "Yaratmoqchi bo'lgan o'yin turini tanlang:",
+        btn_giveaway: "Tugmali o'yin", comment_giveaway: "Izohli o'yin", contest: 'Konkurs',
+        broadcast_title: "Admin: Xabar tarqatish",
+        lang_changed: "Til o'zgartirildi",
+        copied: 'Havola nusxalandi!',
+        filter_saved: 'Filter saqlandi!',
+    },
+    ru: {
+        home: 'Главная', games: 'Мои игры', leaders: 'Рейтинг', create: 'Создать', profile: 'Профиль', admin: 'Админ',
+        my_points: 'Баллы', my_wins: 'Выигрыши', participated: 'Участия', created: 'Создано',
+        active_giveaways: 'Активные розыгрыши', active_contests: 'Активные конкурсы',
+        no_active_gw: 'Активных розыгрышей пока нет', no_active_ct: 'Активных конкурсов пока нет',
+        active: 'Активен', ended: 'Завершён', won: 'Выиграл', accepting: 'Приём', voting: 'Голосование',
+        no_limit: 'Без ограничения', left: 'осталось',
+        participated_games: 'Мои участия', created_games: 'Мои розыгрыши',
+        no_participated: 'Вы ещё не участвовали', no_created: 'Вы ещё не создавали',
+        referral_title: 'Пригласить друга (Реферал)', referral_desc: 'Поделитесь ссылкой — за каждого друга',
+        copy_hint: 'Нажмите, чтобы скопировать', invites: 'Приглашения', earned: 'Получено',
+        points_title: 'Мои баллы', current_points: 'Текущий баланс', total: 'Всего',
+        how_earn: 'Как получить баллы:', join_game: 'Участие', win: 'Победа', invite_friend: 'Реферал', vote_action: 'Голос',
+        recent_actions: 'Последние операции',
+        alerts_title: 'Уведомления', alerts_desc: 'Получать уведомления о новых играх',
+        alerts_on: 'Включено', alerts_off: 'Выключено',
+        lang_title: 'Til / Язык / Language', lang_desc: 'Выберите язык бота:',
+        current_lang: 'Текущий язык',
+        join_filter_title: 'Управление заявками', join_filter_desc: 'Автоматическая обработка заявок на вступление.',
+        add_filter: 'Добавить фильтр', save: 'Сохранить',
+        channel_input: 'ID или @username канала/группы', mode: 'Режим',
+        sub_channels: 'Обязательная подписка',
+        leaderboard_title: 'Самые активные', no_leaderboard: 'Рейтинг пока пуст',
+        pts: 'баллов',
+        create_title: 'Создать новую игру', create_desc: 'Выберите тип:',
+        btn_giveaway: 'Кнопочный розыгрыш', comment_giveaway: 'По комментариям', contest: 'Конкурс',
+        broadcast_title: 'Админ: Рассылка',
+        lang_changed: 'Язык изменён',
+        copied: 'Ссылка скопирована!',
+        filter_saved: 'Фильтр сохранён!',
+    },
+    en: {
+        home: 'Home', games: 'My Games', leaders: 'Leaderboard', create: 'Create', profile: 'Profile', admin: 'Admin',
+        my_points: 'Points', my_wins: 'Wins', participated: 'Joined', created: 'Created',
+        active_giveaways: 'Active Giveaways', active_contests: 'Active Contests',
+        no_active_gw: 'No active giveaways yet', no_active_ct: 'No active contests yet',
+        active: 'Active', ended: 'Ended', won: 'Won', accepting: 'Accepting', voting: 'Voting',
+        no_limit: 'No limit', left: 'left',
+        participated_games: 'Games I joined', created_games: 'Games I created',
+        no_participated: "You haven't joined any games yet", no_created: "You haven't created any yet",
+        referral_title: 'Invite Friends (Referral)', referral_desc: 'Share this link — earn for each invite',
+        copy_hint: 'Tap to copy', invites: 'Invites', earned: 'Earned',
+        points_title: 'My Points', current_points: 'Balance', total: 'Total',
+        how_earn: 'How to earn:', join_game: 'Join game', win: 'Win', invite_friend: 'Referral', vote_action: 'Vote',
+        recent_actions: 'Recent activity',
+        alerts_title: 'Notifications', alerts_desc: 'Get notified about new games',
+        alerts_on: 'Enabled', alerts_off: 'Disabled',
+        lang_title: 'Til / Язык / Language', lang_desc: 'Choose bot language:',
+        current_lang: 'Current language',
+        join_filter_title: 'Join Request Filters', join_filter_desc: 'Auto-process join requests for private channels.',
+        add_filter: 'Add filter', save: 'Save',
+        channel_input: 'Channel/group ID or @username', mode: 'Mode',
+        sub_channels: 'Required subscription channels',
+        leaderboard_title: 'Top Users', no_leaderboard: 'No leaderboard data yet',
+        pts: 'pts',
+        create_title: 'Create a new game', create_desc: 'Choose the type:',
+        btn_giveaway: 'Button Giveaway', comment_giveaway: 'Comment Giveaway', contest: 'Contest',
+        broadcast_title: 'Admin: Broadcast',
+        lang_changed: 'Language changed',
+        copied: 'Link copied!',
+        filter_saved: 'Filter saved!',
+    },
+};
+
+function t(key) { return (T[currentLang] || T['uz'])[key] || (T['uz'])[key] || key; }
 
 async function api(path, method='GET', body=null) {
     const opts = { method, headers };
@@ -212,6 +313,15 @@ async function initApp() {
         isAdmin = false;
     }
 
+    // Load user's language preference
+    try {
+        const langData = await api('/language');
+        if (langData.language) currentLang = langData.language;
+    } catch(e) {}
+
+    // Update nav labels to match language
+    updateNavLabels();
+
     // Show admin tab if user is admin
     if (isAdmin) {
         const navbar = document.querySelector('.navbar');
@@ -219,13 +329,23 @@ async function initApp() {
         adminBtn.className = 'nav-btn';
         adminBtn.dataset.tab = 'admin';
         adminBtn.onclick = () => switchTab('admin');
-        adminBtn.innerHTML = '<span class="nav-icon">⚙️</span><span class="nav-label">Admin</span>';
+        adminBtn.innerHTML = `<span class="nav-icon">⚙️</span><span class="nav-label">${t('admin')}</span>`;
         navbar.appendChild(adminBtn);
     }
 
     // Load initial tab
     const initTab = new URLSearchParams(window.location.search).get('tab') || 'home';
     switchTab(initTab);
+}
+
+function updateNavLabels() {
+    const labels = {home: t('home'), games: t('games'), leaders: t('leaders'), create: t('create'), profile: t('profile')};
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        const tab = btn.dataset.tab;
+        if (labels[tab]) {
+            btn.querySelector('.nav-label').textContent = labels[tab];
+        }
+    });
 }
 
 let currentTab = 'home';
@@ -254,12 +374,12 @@ function timeAgo(iso) {
 }
 
 function timeLeft(iso) {
-    if (!iso) return 'Chegarasiz';
+    if (!iso) return t('no_limit');
     const d = (new Date(iso).getTime() - Date.now()) / 1000;
-    if (d <= 0) return 'Tugagan';
-    if (d < 3600) return Math.floor(d/60) + ' min qoldi';
-    if (d < 86400) return Math.floor(d/3600) + ' soat qoldi';
-    return Math.floor(d/86400) + ' kun qoldi';
+    if (d <= 0) return t('ended');
+    if (d < 3600) return Math.floor(d/60) + ' min ' + t('left');
+    if (d < 86400) return Math.floor(d/3600) + ' h ' + t('left');
+    return Math.floor(d/86400) + ' d ' + t('left');
 }
 </script>
 
@@ -276,20 +396,20 @@ async function renderHome() {
     // User profile card
     if (userData) {
         html += `<div class="card">
-            <div class="card-title">👤 ${userData.first_name || userData.username || 'Foydalanuvchi'}${isAdmin ? ' <span style="font-size:11px;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:10px;">ADMIN</span>' : ''}</div>
+            <div class="card-title">👤 ${userData.first_name || userData.username || ''}${isAdmin ? ' <span style="font-size:11px;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:10px;">ADMIN</span>' : ''}</div>
             <div class="stats-row">
-                <div class="stat-box"><div class="stat-val">${userData.points || 0}</div><div class="stat-lbl">Ballarim</div></div>
-                <div class="stat-box"><div class="stat-val">${userData.wins_count || 0}</div><div class="stat-lbl">Yutganlarim</div></div>
-                <div class="stat-box"><div class="stat-val">${userData.participated_count || 0}</div><div class="stat-lbl">Qatnashganlarim</div></div>
-                <div class="stat-box"><div class="stat-val">${userData.created_count || 0}</div><div class="stat-lbl">Yaratganlarim</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.points || 0}</div><div class="stat-lbl">${t('my_points')}</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.wins_count || 0}</div><div class="stat-lbl">${t('my_wins')}</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.participated_count || 0}</div><div class="stat-lbl">${t('participated')}</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.created_count || 0}</div><div class="stat-lbl">${t('created')}</div></div>
             </div>
         </div>`;
     }
 
     // Active giveaways
-    html += `<div class="card"><div class="card-title">🔥 Faol yutuqli o'yinlar</div>`;
+    html += `<div class="card"><div class="card-title">🔥 ${t('active_giveaways')}</div>`;
     if (!games.length) {
-        html += '<div class="empty-state"><div class="emoji">🎲</div><p>Hozircha faol o\'yinlar yo\'q</p></div>';
+        html += `<div class="empty-state"><div class="emoji">🎲</div><p>${t('no_active_gw')}</p></div>`;
     } else {
         games.forEach(g => {
             html += `<div class="game-item" onclick="openGiveaway(${g.id})">
@@ -298,24 +418,24 @@ async function renderHome() {
                     <div class="game-title">${g.title}</div>
                     <div class="game-meta">🎁 ${g.prize} · 👤 ${g.participants} · ${timeLeft(g.ends_at)}</div>
                 </div>
-                <span class="game-badge badge-active">Faol</span>
+                <span class="game-badge badge-active">${t('active')}</span>
             </div>`;
         });
     }
     html += '</div>';
 
     // Active contests
-    html += `<div class="card"><div class="card-title">🏅 Faol konkurslar</div>`;
+    html += `<div class="card"><div class="card-title">🏅 ${t('active_contests')}</div>`;
     if (!contests.length) {
-        html += '<div class="empty-state"><div class="emoji">🏅</div><p>Hozircha faol konkurslar yo\'q</p></div>';
+        html += `<div class="empty-state"><div class="emoji">🏅</div><p>${t('no_active_ct')}</p></div>`;
     } else {
         contests.forEach(c => {
-            const statusLabel = c.status === 'accepting_submissions' ? 'Qabul qilmoqda' : 'Ovoz berish';
+            const statusLabel = c.status === 'accepting_submissions' ? t('accepting') : t('voting');
             html += `<div class="game-item" onclick="openContest(${c.id})">
                 <div class="game-icon">🏅</div>
                 <div class="game-info">
                     <div class="game-title">${c.title}</div>
-                    <div class="game-meta">📤 ${c.submissions} ishtirok · ${c.prize || 'Sovg\'a yo\'q'}</div>
+                    <div class="game-meta">📤 ${c.submissions} · ${c.prize || ''}</div>
                 </div>
                 <span class="game-badge badge-active">${statusLabel}</span>
             </div>`;
@@ -340,20 +460,20 @@ async function renderGames() {
     const data = await api('/my-games');
     let html = '';
     if (data.referral) {
-        html += `<div class="card"><div class="card-title">👥 Taklif (Referal)</div>
+        html += `<div class="card"><div class="card-title">👥 ${t('referral_title')}</div>
             <div class="stats-row">
-                <div class="stat-box"><div class="stat-val">${data.referral.count}</div><div class="stat-lbl">Takliflar</div></div>
-                <div class="stat-box"><div class="stat-val">${data.referral.points}</div><div class="stat-lbl">Ballar</div></div>
+                <div class="stat-box"><div class="stat-val">${data.referral.count}</div><div class="stat-lbl">${t('invites')}</div></div>
+                <div class="stat-box"><div class="stat-val">${data.referral.points}</div><div class="stat-lbl">${t('my_points')}</div></div>
             </div></div>`;
     }
-    html += `<div class="card"><div class="card-title">🎮 Qatnashgan o'yinlarim</div>`;
+    html += `<div class="card"><div class="card-title">🎮 ${t('participated_games')}</div>`;
     if (!data.participated?.length) {
-        html += '<div class="empty-state"><div class="emoji">🎲</div><p>Siz hali biror o\'yinda qatnashmagansiz</p></div>';
+        html += `<div class="empty-state"><div class="emoji">🎲</div><p>${t('no_participated')}</p></div>`;
     } else {
         data.participated.forEach(g => {
-            const badge = g.won ? '<span class="game-badge badge-won">🏆 Yutdim</span>'
-                : g.status === 'active' ? '<span class="game-badge badge-active">Faol</span>'
-                : '<span class="game-badge badge-ended">Tugagan</span>';
+            const badge = g.won ? `<span class="game-badge badge-won">🏆 ${t('won')}</span>`
+                : g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
+                : `<span class="game-badge badge-ended">${t('ended')}</span>`;
             html += `<div class="game-item">
                 <div class="game-icon">${g.won ? '🏆' : '🎁'}</div>
                 <div class="game-info">
@@ -363,18 +483,18 @@ async function renderGames() {
         });
     }
     html += '</div>';
-    html += `<div class="card"><div class="card-title">📋 Yaratgan o'yinlarim</div>`;
+    html += `<div class="card"><div class="card-title">📋 ${t('created_games')}</div>`;
     if (!data.created?.length) {
-        html += '<div class="empty-state"><p>Siz hali o\'yin yaratmagansiz</p></div>';
+        html += `<div class="empty-state"><p>${t('no_created')}</p></div>`;
     } else {
         data.created.forEach(g => {
-            const badge = g.status === 'active' ? '<span class="game-badge badge-active">Faol</span>'
-                : '<span class="game-badge badge-ended">Tugagan</span>';
+            const badge = g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
+                : `<span class="game-badge badge-ended">${t('ended')}</span>`;
             html += `<div class="game-item">
                 <div class="game-icon">📢</div>
                 <div class="game-info">
                     <div class="game-title">${g.title}</div>
-                    <div class="game-meta">👤 ${g.participants} ishtirokchi · ${timeAgo(g.created_at)}</div>
+                    <div class="game-meta">👤 ${g.participants} · ${timeAgo(g.created_at)}</div>
                 </div>${badge}</div>`;
         });
     }
@@ -390,18 +510,18 @@ async function renderLeaders() {
     const el = document.getElementById('content');
     el.innerHTML = '<div class="empty-state">⏳</div>';
     const data = await api('/leaderboard');
-    let html = `<div class="card"><div class="card-title">🏆 Eng faol foydalanuvchilar</div>`;
+    let html = `<div class="card"><div class="card-title">🏆 ${t('leaderboard_title')}</div>`;
     if (!data.length) {
-        html += '<div class="empty-state"><div class="emoji">🏆</div><p>Hali reyting ma\'lumotlari yo\'q</p></div>';
+        html += `<div class="empty-state"><div class="emoji">🏆</div><p>${t('no_leaderboard')}</p></div>`;
     } else {
         data.forEach((u, i) => {
             const rank = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
             const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1);
-            const name = u.username ? `@${u.username}` : (u.first_name || 'Noma\'lum');
+            const name = u.username ? `@${u.username}` : (u.first_name || '?');
             html += `<div class="lb-item">
                 <div class="lb-rank ${rank}">${medal}</div>
                 <div class="lb-name">${name}</div>
-                <div class="lb-pts">${u.points} ball</div>
+                <div class="lb-pts">${u.points} ${t('pts')}</div>
             </div>`;
         });
     }
@@ -1023,17 +1143,27 @@ async function changeLang(newLang) {
         const res = await api('/language', 'POST', {language: newLang});
         if (res.error) { showToast(res.error, 'error'); return; }
 
-        // Update UI immediately
+        // ACTUALLY change the Mini App language
+        currentLang = newLang;
+
+        // Update navigation labels
+        updateNavLabels();
+
+        // Update UI chips immediately
         const langNames = {uz: "🇺🇿 O'zbekcha", ru: '🇷🇺 Русский', en: '🇬🇧 English'};
         document.querySelectorAll('#langChips .chip').forEach(el => {
             el.classList.toggle('selected', el.id === `lang_${newLang}`);
         });
-        document.getElementById('langStatus').textContent = `Joriy til: ${langNames[newLang]}`;
+        const statusEl = document.getElementById('langStatus');
+        if (statusEl) statusEl.textContent = `${t('current_lang')}: ${langNames[newLang]}`;
 
-        showToast('✅ Til o\'zgartirildi: ' + langNames[newLang]);
+        showToast('✅ ' + t('lang_changed') + ': ' + langNames[newLang]);
         if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
+        // Re-render the current tab so all text updates
+        setTimeout(() => switchTab(currentTab), 300);
     } catch(e) {
-        showToast('Xatolik yuz berdi', 'error');
+        showToast('Error', 'error');
         console.error('setLang error:', e);
     }
 }
