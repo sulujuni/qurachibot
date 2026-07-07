@@ -711,3 +711,330 @@ async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
         "moderation": {"blacklisted": blacklisted},
         "points": {"total_distributed": total_points},
     }
+
+
+
+# ─── Referral endpoints ──────────────────────────────────────────────────────
+
+
+@router.get("/referral")
+async def miniapp_referral(x_telegram_init_data: str | None = Header(None)):
+    """Get user's referral link and stats."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+    username = user.get("username")
+
+    from bot.utils.referral import generate_referral_link, get_referral_count
+    from bot.utils.loyalty import POINTS_CONFIG
+
+    bot_username = settings.BOT_USERNAME or "qurachibot"
+    link = generate_referral_link(bot_username, user_id)
+    count = await get_referral_count(user_id)
+    points_per = POINTS_CONFIG.get("referral", 20)
+
+    return {
+        "link": link,
+        "count": count,
+        "points_earned": count * points_per,
+        "points_per_referral": points_per,
+    }
+
+
+# ─── Contests endpoints ─────────────────────────────────────────────────────
+
+
+@router.get("/active-contests")
+async def miniapp_active_contests():
+    """List active contests."""
+    from bot.models.contest import Contest, ContestStatus, ContestSubmission
+    async with async_session() as session:
+        result = await session.execute(
+            select(Contest)
+            .where(Contest.status.in_([ContestStatus.ACCEPTING_SUBMISSIONS, ContestStatus.VOTING]))
+            .order_by(Contest.created_at.desc())
+            .limit(20)
+        )
+        contests = result.scalars().all()
+
+        items = []
+        for ct in contests:
+            sub_count = (await session.execute(
+                select(func.count(ContestSubmission.id)).where(ContestSubmission.contest_id == ct.id)
+            )).scalar() or 0
+            items.append({
+                "id": ct.id, "title": ct.title, "prize": ct.prize,
+                "status": ct.status.value, "type": ct.contest_type.value,
+                "submissions": sub_count, "winner_count": ct.winner_count,
+                "created_at": ct.created_at.isoformat() if ct.created_at else None,
+            })
+    return items
+
+
+@router.get("/contest/{contest_id}")
+async def miniapp_contest_detail(contest_id: int, x_telegram_init_data: str | None = Header(None)):
+    """Get contest detail with submissions."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.contest import Contest, ContestStatus, ContestSubmission, ContestVote
+
+    async with async_session() as session:
+        result = await session.execute(select(Contest).where(Contest.id == contest_id))
+        ct = result.scalar_one_or_none()
+        if not ct:
+            raise HTTPException(status_code=404, detail="Contest not found")
+
+        # Get submissions with vote counts
+        result = await session.execute(
+            select(ContestSubmission).where(ContestSubmission.contest_id == contest_id)
+            .order_by(ContestSubmission.vote_count.desc())
+        )
+        submissions = result.scalars().all()
+
+        # Check which submissions user has voted for
+        result = await session.execute(
+            select(ContestVote.submission_id).where(ContestVote.user_id == user_id)
+        )
+        voted_ids = set(r[0] for r in result.all())
+
+        # Check user's own submissions
+        user_submitted = any(s.user_id == user_id for s in submissions)
+
+    return {
+        "id": ct.id, "title": ct.title, "description": ct.description,
+        "prize": ct.prize, "status": ct.status.value, "type": ct.contest_type.value,
+        "winner_count": ct.winner_count, "is_creator": ct.creator_id == user_id,
+        "user_submitted": user_submitted,
+        "submissions": [
+            {
+                "id": s.id,
+                "user": f"@{s.username}" if s.username else (s.first_name or f"User"),
+                "text": s.text_content[:200] if s.text_content else None,
+                "has_photo": bool(s.file_id),
+                "votes": s.vote_count or 0,
+                "user_voted": s.id in voted_ids,
+                "is_mine": s.user_id == user_id,
+            }
+            for s in submissions[:30]
+        ],
+    }
+
+
+@router.post("/contest/{contest_id}/vote/{submission_id}")
+async def miniapp_vote(contest_id: int, submission_id: int, x_telegram_init_data: str | None = Header(None)):
+    """Vote for a contest submission."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.contest import Contest, ContestStatus, ContestSubmission, ContestVote
+
+    async with async_session() as session:
+        result = await session.execute(select(ContestSubmission).where(ContestSubmission.id == submission_id))
+        sub = result.scalar_one_or_none()
+        if not sub:
+            return {"error": "Ishtirok topilmadi"}
+        if sub.user_id == user_id:
+            return {"error": "O'z ishtirokingizga ovoz bera olmaysiz"}
+
+        result = await session.execute(select(Contest).where(Contest.id == contest_id))
+        ct = result.scalar_one_or_none()
+        if not ct or ct.status not in (ContestStatus.ACCEPTING_SUBMISSIONS, ContestStatus.VOTING):
+            return {"error": "Ovoz berish yopilgan"}
+
+        # Check already voted
+        result = await session.execute(
+            select(ContestVote).where(ContestVote.submission_id == submission_id, ContestVote.user_id == user_id)
+        )
+        if result.scalar_one_or_none():
+            return {"error": "Allaqachon ovoz bergansiz"}
+
+        vote = ContestVote(submission_id=submission_id, user_id=user_id)
+        session.add(vote)
+        sub.vote_count = (sub.vote_count or 0) + 1
+        await session.commit()
+
+    return {"success": True, "votes": sub.vote_count}
+
+
+# ─── Join Filter endpoints ───────────────────────────────────────────────────
+
+
+@router.get("/join-filters")
+async def miniapp_join_filters(x_telegram_init_data: str | None = Header(None)):
+    """Get join filters managed by the user (admin or creator)."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.handlers.join_request import JoinFilter
+
+    async with async_session() as session:
+        # For admins, show all; for others, this won't have entries
+        if user_id in settings.ADMIN_IDS:
+            result = await session.execute(select(JoinFilter).order_by(JoinFilter.created_at.desc()))
+        else:
+            result = await session.execute(
+                select(JoinFilter).order_by(JoinFilter.created_at.desc()).limit(10)
+            )
+        filters = result.scalars().all()
+
+    return [
+        {
+            "chat_id": f.chat_id, "chat_title": f.chat_title,
+            "mode": f.filter_mode, "enabled": f.enabled,
+            "channels": f.required_channels,
+            "accepted": f.accepted or 0, "rejected": f.rejected or 0,
+        }
+        for f in filters
+    ]
+
+
+@router.post("/join-filter/set")
+async def miniapp_set_join_filter(request: Request, x_telegram_init_data: str | None = Header(None)):
+    """Set join filter for a chat (admin only)."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    body = await request.json()
+    chat_id = body.get("chat_id")
+    mode = body.get("mode", "all")
+    channels = body.get("channels")
+
+    if not chat_id:
+        return {"error": "chat_id kerak"}
+
+    valid_modes = ("all", "no_bots", "females", "males", "subscribed", "started", "off")
+    if mode not in valid_modes:
+        return {"error": f"Noto'g'ri rejim. Mavjud: {', '.join(valid_modes)}"}
+
+    from bot.handlers.join_request import JoinFilter
+    from bot.utils.subscription import serialize_channels, parse_channels as _pc
+
+    channels_str = serialize_channels(_pc(channels)) if channels else None
+
+    async with async_session() as session:
+        result = await session.execute(select(JoinFilter).where(JoinFilter.chat_id == int(chat_id)))
+        config = result.scalar_one_or_none()
+
+        if config:
+            config.filter_mode = mode
+            config.enabled = (mode != "off")
+            if channels_str:
+                config.required_channels = channels_str
+        else:
+            config = JoinFilter(
+                chat_id=int(chat_id), filter_mode=mode,
+                enabled=(mode != "off"), required_channels=channels_str,
+            )
+            session.add(config)
+        await session.commit()
+
+    return {"success": True, "mode": mode}
+
+
+# ─── Language endpoint ───────────────────────────────────────────────────────
+
+
+@router.get("/language")
+async def miniapp_get_language(x_telegram_init_data: str | None = Header(None)):
+    """Get user's current language."""
+    user = _get_user_from_header(x_telegram_init_data)
+    from bot.utils.lang import get_user_lang
+    lang = await get_user_lang(user["id"])
+    return {"language": lang, "available": ["en", "ru", "uz"]}
+
+
+@router.post("/language")
+async def miniapp_set_language(request: Request, x_telegram_init_data: str | None = Header(None)):
+    """Set user's language."""
+    user = _get_user_from_header(x_telegram_init_data)
+    body = await request.json()
+    lang = body.get("language", "uz")
+    if lang not in ("en", "ru", "uz"):
+        return {"error": "Noto'g'ri til"}
+    from bot.utils.lang import set_user_lang
+    await set_user_lang(user["id"], lang)
+    return {"success": True, "language": lang}
+
+
+# ─── Points/Loyalty endpoints ────────────────────────────────────────────────
+
+
+@router.get("/points")
+async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
+    """Get user's points detail."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.loyalty import LoyaltyPoints, PointsTransaction
+    from bot.utils.loyalty import POINTS_CONFIG
+
+    async with async_session() as session:
+        result = await session.execute(select(LoyaltyPoints).where(LoyaltyPoints.user_id == user_id))
+        loyalty = result.scalar_one_or_none()
+
+        # Recent transactions
+        result = await session.execute(
+            select(PointsTransaction).where(PointsTransaction.user_id == user_id)
+            .order_by(PointsTransaction.created_at.desc()).limit(20)
+        )
+        transactions = result.scalars().all()
+
+    return {
+        "points": loyalty.points if loyalty else 0,
+        "total_earned": loyalty.total_earned if loyalty else 0,
+        "total_spent": loyalty.total_spent if loyalty else 0,
+        "giveaways_joined": loyalty.giveaways_joined if loyalty else 0,
+        "contests_joined": loyalty.contests_joined if loyalty else 0,
+        "wins": loyalty.wins if loyalty else 0,
+        "referrals_made": loyalty.referrals_made if loyalty else 0,
+        "config": POINTS_CONFIG,
+        "transactions": [
+            {"amount": t.amount, "reason": t.reason, "date": t.created_at.isoformat() if t.created_at else None}
+            for t in transactions
+        ],
+    }
+
+
+# ─── Alerts/Notifications ────────────────────────────────────────────────────
+
+
+@router.get("/alerts")
+async def miniapp_alerts(x_telegram_init_data: str | None = Header(None)):
+    """Get user's alert subscription status."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.notification import AlertSubscription
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(AlertSubscription).where(AlertSubscription.user_id == user_id)
+        )
+        sub = result.scalar_one_or_none()
+
+    return {"subscribed": sub is not None}
+
+
+@router.post("/alerts/toggle")
+async def miniapp_toggle_alerts(x_telegram_init_data: str | None = Header(None)):
+    """Toggle alert subscription."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.notification import AlertSubscription
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(AlertSubscription).where(AlertSubscription.user_id == user_id)
+        )
+        sub = result.scalar_one_or_none()
+
+        if sub:
+            await session.delete(sub)
+            await session.commit()
+            return {"subscribed": False}
+        else:
+            session.add(AlertSubscription(user_id=user_id))
+            await session.commit()
+            return {"subscribed": True}

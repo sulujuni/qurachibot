@@ -32,6 +32,9 @@
         <button class="nav-btn" data-tab="create" onclick="switchTab('create')">
             <span class="nav-icon">➕</span><span class="nav-label">Yaratish</span>
         </button>
+        <button class="nav-btn" data-tab="profile" onclick="switchTab('profile')">
+            <span class="nav-icon">👤</span><span class="nav-label">Profil</span>
+        </button>
     </nav>
 </div>
 </body>
@@ -219,7 +222,7 @@ let currentTab = 'home';
 function switchTab(tab) {
     currentTab = tab;
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate, admin: renderAdmin };
+    const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate, admin: renderAdmin, profile: renderProfile };
     if (loaders[tab]) loaders[tab]();
 }
 
@@ -256,7 +259,7 @@ function timeLeft(iso) {
 async function renderHome() {
     const el = document.getElementById('content');
     el.innerHTML = '<div class="empty-state"><div class="loading-dots">⏳</div></div>';
-    const [stats, games] = await Promise.all([api('/stats'), api('/active-giveaways')]);
+    const [stats, games, contests] = await Promise.all([api('/stats'), api('/active-giveaways'), api('/active-contests')]);
 
     let html = '';
 
@@ -272,13 +275,6 @@ async function renderHome() {
             </div>
         </div>`;
     }
-
-    // Global stats
-    html += `
-    <div class="stats-row">
-        <div class="stat-box"><div class="stat-val">${stats.giveaways?.active||0}</div><div class="stat-lbl">Faol o'yinlar</div></div>
-        <div class="stat-box"><div class="stat-val">${stats.users?.unique||0}</div><div class="stat-lbl">Ishtirokchilar</div></div>
-    </div>`;
 
     // Active giveaways
     html += `<div class="card"><div class="card-title">🔥 Faol yutuqli o'yinlar</div>`;
@@ -297,6 +293,26 @@ async function renderHome() {
         });
     }
     html += '</div>';
+
+    // Active contests
+    html += `<div class="card"><div class="card-title">🏅 Faol konkurslar</div>`;
+    if (!contests.length) {
+        html += '<div class="empty-state"><div class="emoji">🏅</div><p>Hozircha faol konkurslar yo\'q</p></div>';
+    } else {
+        contests.forEach(c => {
+            const statusLabel = c.status === 'accepting_submissions' ? 'Qabul qilmoqda' : 'Ovoz berish';
+            html += `<div class="game-item" onclick="openContest(${c.id})">
+                <div class="game-icon">🏅</div>
+                <div class="game-info">
+                    <div class="game-title">${c.title}</div>
+                    <div class="game-meta">📤 ${c.submissions} ishtirok · ${c.prize || 'Sovg\'a yo\'q'}</div>
+                </div>
+                <span class="game-badge badge-active">${statusLabel}</span>
+            </div>`;
+        });
+    }
+    html += '</div>';
+
     el.innerHTML = html;
 }
 
@@ -595,5 +611,194 @@ async function adminCancel(id) {
     if (res.error) { showToast(res.error, 'error'); return; }
     showToast("❌ Bekor qilindi");
     renderAdmin();
+}
+</script>
+
+
+<script>
+// ─── PROFILE TAB ───────────────────────────────────────────────
+async function renderProfile() {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+
+    const [points, referral, alerts, lang] = await Promise.all([
+        api('/points'), api('/referral'), api('/alerts'), api('/language'),
+    ]);
+
+    let html = '';
+
+    // Referral card
+    html += `<div class="card">
+        <div class="card-title">👥 Do'st taklif qilish</div>
+        <p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">Havolani ulashing — har bir taklif uchun +${referral.points_per_referral} ball</p>
+        <div class="form-group">
+            <input class="form-input" id="refLink" value="${referral.link}" readonly onclick="copyRefLink()" style="font-size:13px;">
+            <div class="form-hint">👆 Nusxa olish uchun bosing</div>
+        </div>
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${referral.count}</div><div class="stat-lbl">Takliflar</div></div>
+            <div class="stat-box"><div class="stat-val">${referral.points_earned}</div><div class="stat-lbl">Ishlab topilgan</div></div>
+        </div>
+    </div>`;
+
+    // Points card
+    html += `<div class="card">
+        <div class="card-title">💰 Ballarim</div>
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${points.points}</div><div class="stat-lbl">Joriy ballar</div></div>
+            <div class="stat-box"><div class="stat-val">${points.total_earned}</div><div class="stat-lbl">Jami ishlab topilgan</div></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-hint);margin-top:8px;">
+            🎮 O'yinga qo'shilish: +${points.config?.join_giveaway || 5} | 
+            🏆 Yutish: +${points.config?.win_giveaway || 50} | 
+            👥 Taklif: +${points.config?.referral || 20}
+        </p>`;
+    if (points.transactions?.length) {
+        html += `<div style="margin-top:12px;max-height:200px;overflow-y:auto;">`;
+        points.transactions.slice(0,10).forEach(t => {
+            const sign = t.amount > 0 ? '+' : '';
+            const color = t.amount > 0 ? '#4caf50' : '#f44336';
+            html += `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+                <span>${t.reason}</span>
+                <span style="color:${color};font-weight:700;">${sign}${t.amount}</span>
+            </div>`;
+        });
+        html += `</div>`;
+    }
+    html += `</div>`;
+
+    // Alerts toggle
+    html += `<div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="card-title" style="margin-bottom:0;">🔔 Bildirishnomalar</div>
+            <button class="chip ${alerts.subscribed ? 'selected' : ''}" onclick="toggleAlerts()" id="alertBtn">
+                ${alerts.subscribed ? '✅ Faol' : '❌ O\'chirilgan'}
+            </button>
+        </div>
+        <p style="font-size:12px;color:var(--text-hint);margin-top:8px;">Yangi o'yinlar haqida xabar olish</p>
+    </div>`;
+
+    // Language selector
+    const langNames = {en: '🇬🇧 English', ru: '🇷🇺 Русский', uz: "🇺🇿 O'zbekcha"};
+    html += `<div class="card">
+        <div class="card-title">🌐 Til</div>
+        <div class="chip-row">
+            ${['uz','ru','en'].map(l => `<span class="chip ${lang.language===l?'selected':''}" onclick="setLang('${l}')">${langNames[l]}</span>`).join('')}
+        </div>
+    </div>`;
+
+    // Join filters (admin only)
+    if (isAdmin) {
+        const filters = await api('/join-filters');
+        html += `<div class="card">
+            <div class="card-title">🚪 Join Request Filters</div>`;
+        if (filters.length) {
+            filters.forEach(f => {
+                html += `<div class="game-item">
+                    <div class="game-icon">${f.enabled ? '✅' : '❌'}</div>
+                    <div class="game-info">
+                        <div class="game-title">${f.chat_title || f.chat_id}</div>
+                        <div class="game-meta">Rejim: ${f.mode} · ✅${f.accepted} ❌${f.rejected}</div>
+                    </div>
+                </div>`;
+            });
+        } else {
+            html += `<p style="font-size:13px;color:var(--text-hint);">Hali sozlanmagan. Kanalda /joinfilter ishlating.</p>`;
+        }
+        html += `</div>`;
+    }
+
+    el.innerHTML = html;
+}
+
+function copyRefLink() {
+    const input = document.getElementById('refLink');
+    input.select();
+    navigator.clipboard.writeText(input.value).then(() => {
+        showToast('📋 Havola nusxalandi!');
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+    });
+}
+
+async function toggleAlerts() {
+    const res = await api('/alerts/toggle', 'POST');
+    const btn = document.getElementById('alertBtn');
+    btn.className = `chip ${res.subscribed ? 'selected' : ''}`;
+    btn.textContent = res.subscribed ? '✅ Faol' : "❌ O'chirilgan";
+    showToast(res.subscribed ? '🔔 Bildirishnomalar yoqildi' : '🔕 Bildirishnomalar o\'chirildi');
+}
+
+async function setLang(lang) {
+    await api('/language', 'POST', {language: lang});
+    showToast('✅ Til o\'zgartirildi');
+    renderProfile();
+}
+</script>
+
+<script>
+// ─── CONTEST DETAIL VIEW ───────────────────────────────────────
+async function openContest(id) {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+
+    const data = await api(`/contest/${id}`);
+    if (!data.id) { showToast('Konkurs topilmadi', 'error'); switchTab('home'); return; }
+
+    const statusLabels = {
+        accepting_submissions: '📤 Ishtirok qabul qilmoqda',
+        voting: '🗳 Ovoz berish',
+        completed: '✅ Yakunlangan',
+        cancelled: '❌ Bekor qilingan',
+    };
+
+    let html = `
+    <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span onclick="switchTab('home')" style="cursor:pointer;font-size:20px;">←</span>
+            <div class="card-title" style="margin-bottom:0;">🏅 ${data.title}</div>
+        </div>
+        ${data.description ? `<p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">${data.description}</p>` : ''}
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${data.submissions.length}</div><div class="stat-lbl">Ishtiroklar</div></div>
+            <div class="stat-box"><div class="stat-val">${data.winner_count}</div><div class="stat-lbl">G'oliblar</div></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span class="chip selected">${statusLabels[data.status] || data.status}</span>
+            ${data.prize ? `<span class="chip">🎁 ${data.prize}</span>` : ''}
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">📤 Ishtiroklar</div>`;
+
+    if (!data.submissions.length) {
+        html += '<div class="empty-state"><p>Hali ishtiroklar yo\'q</p></div>';
+    } else {
+        data.submissions.forEach(s => {
+            const voteBtn = (!s.is_mine && !s.user_voted && ['accepting_submissions','voting'].includes(data.status))
+                ? `<button class="chip" onclick="voteSubmission(${data.id},${s.id})" id="vote_${s.id}">👍 Ovoz</button>`
+                : s.user_voted ? '<span class="chip selected">✅ Ovoz berdingiz</span>' : '';
+            html += `<div class="game-item" style="flex-direction:column;align-items:stretch;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div class="game-icon">${s.has_photo ? '📷' : '📝'}</div>
+                    <div class="game-info">
+                        <div class="game-title">${s.user}${s.is_mine ? ' (siz)' : ''}</div>
+                        <div class="game-meta">${s.text ? s.text.substring(0,80) : '[Rasm]'} · 👍 ${s.votes} ovoz</div>
+                    </div>
+                </div>
+                <div style="margin-top:6px;">${voteBtn}</div>
+            </div>`;
+        });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+async function voteSubmission(contestId, submissionId) {
+    const res = await api(`/contest/${contestId}/vote/${submissionId}`, 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast('👍 Ovoz qabul qilindi!');
+    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    openContest(contestId); // refresh
 }
 </script>
