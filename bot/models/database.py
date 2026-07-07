@@ -36,6 +36,7 @@ async def init_db():
     import bot.models.moderation  # noqa: F401
     import bot.models.notification  # noqa: F401
     import bot.models.group_giveaway  # noqa: F401
+    import bot.handlers.join_request  # noqa: F401 — JoinFilter model
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
