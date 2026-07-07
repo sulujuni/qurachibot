@@ -516,3 +516,198 @@ async def miniapp_create_contest(
         await session.refresh(contest)
 
     return {"success": True, "id": contest.id, "title": contest.title}
+
+
+
+@router.get("/me")
+async def miniapp_me(x_telegram_init_data: str | None = Header(None)):
+    """Get current user info + role (admin or regular)."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    is_admin = user_id in settings.ADMIN_IDS
+
+    # Get user's loyalty stats
+    from bot.models.loyalty import LoyaltyPoints
+    async with async_session() as session:
+        result = await session.execute(
+            select(LoyaltyPoints).where(LoyaltyPoints.user_id == user_id)
+        )
+        loyalty = result.scalar_one_or_none()
+
+        # Count their giveaways
+        created_count = (await session.execute(
+            select(func.count(Giveaway.id)).where(Giveaway.creator_id == user_id)
+        )).scalar() or 0
+
+        participated_count = (await session.execute(
+            select(func.count(GiveawayParticipant.id)).where(GiveawayParticipant.user_id == user_id)
+        )).scalar() or 0
+
+        wins_count = (await session.execute(
+            select(func.count(GiveawayWinner.id)).where(GiveawayWinner.user_id == user_id)
+        )).scalar() or 0
+
+    return {
+        "id": user_id,
+        "username": user.get("username"),
+        "first_name": user.get("first_name"),
+        "is_admin": is_admin,
+        "points": loyalty.points if loyalty else 0,
+        "total_earned": loyalty.total_earned if loyalty else 0,
+        "created_count": created_count,
+        "participated_count": participated_count,
+        "wins_count": wins_count,
+    }
+
+
+@router.get("/admin/all-giveaways")
+async def admin_all_giveaways(x_telegram_init_data: str | None = Header(None)):
+    """Admin: get all giveaways with management info."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).order_by(Giveaway.created_at.desc()).limit(50)
+        )
+        giveaways = result.scalars().all()
+
+        items = []
+        for gw in giveaways:
+            count = (await session.execute(
+                select(func.count(GiveawayParticipant.id)).where(
+                    GiveawayParticipant.giveaway_id == gw.id
+                )
+            )).scalar() or 0
+            items.append({
+                "id": gw.id, "title": gw.title, "prize": gw.prize,
+                "status": gw.status.value, "participants": count,
+                "winner_count": gw.winner_count,
+                "creator_username": gw.creator_username,
+                "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
+                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+            })
+    return items
+
+
+@router.post("/admin/draw/{giveaway_id}")
+async def admin_draw_giveaway(
+    giveaway_id: int,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Admin: draw winners for a giveaway."""
+    import random
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(Giveaway.id == giveaway_id)
+        )
+        giveaway = result.scalar_one_or_none()
+        if not giveaway:
+            return {"error": "Topilmadi"}
+        if giveaway.status != GiveawayStatus.ACTIVE:
+            return {"error": "Bu o'yin faol emas"}
+
+        # Get participants
+        result = await session.execute(
+            select(GiveawayParticipant).where(
+                GiveawayParticipant.giveaway_id == giveaway_id
+            )
+        )
+        participants = result.scalars().all()
+        if not participants:
+            return {"error": "Ishtirokchilar yo'q"}
+
+        winner_count = min(giveaway.winner_count, len(participants))
+        winners = random.sample(participants, winner_count)
+
+        for w in winners:
+            session.add(GiveawayWinner(
+                giveaway_id=giveaway_id,
+                user_id=w.user_id, username=w.username, first_name=w.first_name,
+            ))
+
+        giveaway.status = GiveawayStatus.COMPLETED
+        giveaway.drawn_at = datetime.utcnow()
+        await session.commit()
+
+    winner_names = [f"@{w.username}" if w.username else (w.first_name or f"ID:{w.user_id}") for w in winners]
+    return {"success": True, "winners": winner_names, "total_participants": len(participants)}
+
+
+@router.post("/admin/cancel/{giveaway_id}")
+async def admin_cancel_giveaway(
+    giveaway_id: int,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Admin: cancel a giveaway."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(Giveaway.id == giveaway_id)
+        )
+        giveaway = result.scalar_one_or_none()
+        if not giveaway:
+            return {"error": "Topilmadi"}
+        if giveaway.status != GiveawayStatus.ACTIVE:
+            return {"error": "Bu o'yin faol emas"}
+
+        giveaway.status = GiveawayStatus.CANCELLED
+        await session.commit()
+
+    return {"success": True}
+
+
+@router.get("/admin/stats")
+async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
+    """Admin: detailed bot statistics."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from bot.models.contest import Contest, ContestStatus
+    from bot.models.referral import Referral
+    from bot.models.moderation import Blacklist
+    from bot.models.loyalty import LoyaltyPoints
+
+    async with async_session() as session:
+        gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar() or 0
+        gw_active = (await session.execute(
+            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+        )).scalar() or 0
+        gw_completed = (await session.execute(
+            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.COMPLETED)
+        )).scalar() or 0
+        total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar() or 0
+        total_winners = (await session.execute(select(func.count(GiveawayWinner.id)))).scalar() or 0
+        unique_users = (await session.execute(
+            select(func.count(func.distinct(GiveawayParticipant.user_id)))
+        )).scalar() or 0
+        ct_total = (await session.execute(select(func.count(Contest.id)))).scalar() or 0
+        total_referrals = (await session.execute(select(func.count(Referral.id)))).scalar() or 0
+        verified_referrals = (await session.execute(
+            select(func.count(Referral.id)).where(Referral.verified == True)
+        )).scalar() or 0
+        blacklisted = (await session.execute(
+            select(func.count(Blacklist.id)).where(Blacklist.is_active == True)
+        )).scalar() or 0
+        total_points = (await session.execute(
+            select(func.sum(LoyaltyPoints.total_earned))
+        )).scalar() or 0
+
+    return {
+        "giveaways": {"total": gw_total, "active": gw_active, "completed": gw_completed},
+        "participants": {"total": total_participants, "unique_users": unique_users, "winners": total_winners},
+        "contests": {"total": ct_total},
+        "referrals": {"total": total_referrals, "verified": verified_referrals},
+        "moderation": {"blacklisted": blacklisted},
+        "points": {"total_distributed": total_points},
+    }

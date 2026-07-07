@@ -181,6 +181,9 @@ tg.expand();
 const BASE = window.location.origin;
 const headers = { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg.initData };
 
+let isAdmin = false;
+let userData = null;
+
 async function api(path, method='GET', body=null) {
     const opts = { method, headers };
     if (body) opts.body = JSON.stringify(body);
@@ -188,12 +191,36 @@ async function api(path, method='GET', body=null) {
     return r.json();
 }
 
+async function initApp() {
+    try {
+        userData = await api('/me');
+        isAdmin = userData.is_admin;
+    } catch(e) {
+        isAdmin = false;
+    }
+
+    // Show admin tab if user is admin
+    if (isAdmin) {
+        const navbar = document.querySelector('.navbar');
+        const adminBtn = document.createElement('button');
+        adminBtn.className = 'nav-btn';
+        adminBtn.dataset.tab = 'admin';
+        adminBtn.onclick = () => switchTab('admin');
+        adminBtn.innerHTML = '<span class="nav-icon">⚙️</span><span class="nav-label">Admin</span>';
+        navbar.appendChild(adminBtn);
+    }
+
+    // Load initial tab
+    const initTab = new URLSearchParams(window.location.search).get('tab') || 'home';
+    switchTab(initTab);
+}
+
 let currentTab = 'home';
 function switchTab(tab) {
     currentTab = tab;
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
-    const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate };
-    loaders[tab]();
+    const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate, admin: renderAdmin };
+    if (loaders[tab]) loaders[tab]();
 }
 
 function showToast(msg, type='success') {
@@ -230,14 +257,31 @@ async function renderHome() {
     const el = document.getElementById('content');
     el.innerHTML = '<div class="empty-state"><div class="loading-dots">⏳</div></div>';
     const [stats, games] = await Promise.all([api('/stats'), api('/active-giveaways')]);
-    let html = `
+
+    let html = '';
+
+    // User profile card
+    if (userData) {
+        html += `<div class="card">
+            <div class="card-title">👤 ${userData.first_name || userData.username || 'Foydalanuvchi'}${isAdmin ? ' <span style="font-size:11px;background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:10px;">ADMIN</span>' : ''}</div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-val">${userData.points || 0}</div><div class="stat-lbl">Ballarim</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.wins_count || 0}</div><div class="stat-lbl">Yutganlarim</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.participated_count || 0}</div><div class="stat-lbl">Qatnashganlarim</div></div>
+                <div class="stat-box"><div class="stat-val">${userData.created_count || 0}</div><div class="stat-lbl">Yaratganlarim</div></div>
+            </div>
+        </div>`;
+    }
+
+    // Global stats
+    html += `
     <div class="stats-row">
         <div class="stat-box"><div class="stat-val">${stats.giveaways?.active||0}</div><div class="stat-lbl">Faol o'yinlar</div></div>
         <div class="stat-box"><div class="stat-val">${stats.users?.unique||0}</div><div class="stat-lbl">Ishtirokchilar</div></div>
-        <div class="stat-box"><div class="stat-val">${stats.giveaways?.total||0}</div><div class="stat-lbl">Jami o'yinlar</div></div>
-        <div class="stat-box"><div class="stat-val">${stats.contests?.total||0}</div><div class="stat-lbl">Konkurslar</div></div>
-    </div>
-    <div class="card"><div class="card-title">🔥 Faol yutuqli o'yinlar</div>`;
+    </div>`;
+
+    // Active giveaways
+    html += `<div class="card"><div class="card-title">🔥 Faol yutuqli o'yinlar</div>`;
     if (!games.length) {
         html += '<div class="empty-state"><div class="emoji">🎲</div><p>Hozircha faol o\'yinlar yo\'q</p></div>';
     } else {
@@ -468,6 +512,88 @@ async function submitContest() {
 }
 
 // ─── Initialize ─────────────────────────────────────────────────
-const initTab = new URLSearchParams(window.location.search).get('tab') || 'home';
-switchTab(initTab);
+initApp();
+</script>
+
+
+<script>
+// ─── ADMIN TAB (only visible to admins) ─────────────────────────
+async function renderAdmin() {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+
+    const [stats, giveaways] = await Promise.all([
+        api('/admin/stats'),
+        api('/admin/all-giveaways'),
+    ]);
+
+    let html = `
+    <div class="card">
+        <div class="card-title">⚙️ Admin Panel</div>
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${stats.giveaways?.total||0}</div><div class="stat-lbl">Jami o'yinlar</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.giveaways?.active||0}</div><div class="stat-lbl">Faol</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.participants?.unique_users||0}</div><div class="stat-lbl">Foydalanuvchilar</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.participants?.winners||0}</div><div class="stat-lbl">G'oliblar</div></div>
+        </div>
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${stats.referrals?.verified||0}</div><div class="stat-lbl">Referallar</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.contests?.total||0}</div><div class="stat-lbl">Konkurslar</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.moderation?.blacklisted||0}</div><div class="stat-lbl">Bloklangan</div></div>
+            <div class="stat-box"><div class="stat-val">${stats.points?.total_distributed||0}</div><div class="stat-lbl">Jami ballar</div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-title">📋 Barcha o'yinlar (boshqarish)</div>`;
+
+    if (!giveaways.length) {
+        html += '<div class="empty-state"><p>O\'yinlar yo\'q</p></div>';
+    } else {
+        giveaways.forEach(g => {
+            const statusBadge = g.status === 'active'
+                ? '<span class="game-badge badge-active">Faol</span>'
+                : g.status === 'completed'
+                ? '<span class="game-badge badge-ended">Tugagan</span>'
+                : '<span class="game-badge badge-ended">Bekor</span>';
+
+            const actions = g.status === 'active' ? `
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                    <button class="btn btn-primary" style="padding:8px 12px;font-size:12px;width:auto;flex:1;" onclick="adminDraw(${g.id})">🎲 Qur'a</button>
+                    <button class="btn btn-secondary" style="padding:8px 12px;font-size:12px;width:auto;flex:1;margin-top:0;" onclick="adminCancel(${g.id})">❌ Bekor</button>
+                </div>` : '';
+
+            html += `<div class="game-item" style="flex-direction:column;align-items:stretch;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div class="game-icon">🎁</div>
+                    <div class="game-info">
+                        <div class="game-title">${g.title}</div>
+                        <div class="game-meta">👤 ${g.participants} · 🏆 ${g.winner_count} · ${g.creator_username ? '@'+g.creator_username : 'Noma\'lum'} · ${timeAgo(g.created_at)}</div>
+                    </div>
+                    ${statusBadge}
+                </div>
+                ${actions}
+            </div>`;
+        });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+async function adminDraw(id) {
+    if (!confirm("G'oliblarni aniqlamoqchimisiz?")) return;
+    const res = await api(`/admin/draw/${id}`, 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(`🎉 G'oliblar: ${res.winners.join(', ')}`);
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    renderAdmin();
+}
+
+async function adminCancel(id) {
+    if (!confirm("Bu o'yinni bekor qilmoqchimisiz?")) return;
+    const res = await api(`/admin/cancel/${id}`, 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast("❌ Bekor qilindi");
+    renderAdmin();
+}
 </script>
