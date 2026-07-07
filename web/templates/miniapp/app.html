@@ -419,14 +419,18 @@ function renderCreate() {
     const el = document.getElementById('content');
     el.innerHTML = `
     <div class="card">
-        <div class="card-title">➕ Yangi o'yin/konkurs yaratish</div>
+        <div class="card-title">➕ Yangi o'yin yaratish</div>
+        <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">Yaratmoqchi bo'lgan o'yin turini tanlang:</p>
         <div class="chip-row">
-            <span class="chip ${createType==='giveaway'?'selected':''}" onclick="setType('giveaway')">🎲 Yutuqli o'yin</span>
+            <span class="chip ${createType==='giveaway'?'selected':''}" onclick="setType('giveaway')">🎲 Tugmali o'yin</span>
+            <span class="chip ${createType==='comment'?'selected':''}" onclick="setType('comment')">💬 Izohli o'yin</span>
             <span class="chip ${createType==='contest'?'selected':''}" onclick="setType('contest')">🏅 Konkurs</span>
         </div>
         <div id="createForm"></div>
-    </div>`;
+    </div>
+    ${isAdmin ? '<div class="card"><div class="card-title">📢 Admin: Xabar tarqatish</div><div id="broadcastForm"></div></div>' : ''}`;
     renderCreateForm();
+    if (isAdmin) renderBroadcastForm();
 }
 
 function setType(t) { createType = t; renderCreate(); }
@@ -435,17 +439,22 @@ function renderCreateForm() {
     const f = document.getElementById('createForm');
     if (createType === 'giveaway') {
         f.innerHTML = `
+        <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+            <b>🎲 Tugmali yutuqli o'yin</b><br>
+            Bot postda "Qatnashish" tugmasini qo'yadi. Foydalanuvchilar tugmani bosib qatnashadilar.
+            G'olib tasodifiy tanlanadi.
+        </div>
         <div class="form-group">
-            <label class="form-label">Nomi</label>
+            <label class="form-label">O'yin nomi *</label>
             <input class="form-input" id="cTitle" placeholder="masalan: iPhone 15 Pro sovg'a o'yini">
         </div>
         <div class="form-group">
-            <label class="form-label">Sovg'a</label>
-            <input class="form-input" id="cPrize" placeholder="masalan: iPhone 15 Pro, $500">
+            <label class="form-label">Sovg'a *</label>
+            <input class="form-input" id="cPrize" placeholder="masalan: iPhone 15 Pro, $500, 1 oylik Premium">
         </div>
         <div class="form-group">
             <label class="form-label">Tavsif (ixtiyoriy)</label>
-            <textarea class="form-textarea" id="cDesc" placeholder="O'yin qoidalari, shartlari..."></textarea>
+            <textarea class="form-textarea" id="cDesc" placeholder="O'yin qoidalari, shartlari, kimlar qatnasha oladi..."></textarea>
         </div>
         <div class="form-group">
             <label class="form-label">G'oliblar soni</label>
@@ -460,19 +469,92 @@ function renderCreateForm() {
                 <option value="24h" selected>24 soat</option>
                 <option value="3d">3 kun</option>
                 <option value="7d">7 kun</option>
-                <option value="none">Chegarasiz</option>
+                <option value="none">Chegarasiz (qo'lda o'tkazish)</option>
             </select>
         </div>
         <div class="form-group">
-            <label class="form-label">Majburiy kanallar (ixtiyoriy)</label>
+            <label class="form-label">Majburiy obuna (ixtiyoriy)</label>
             <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
             <div class="form-hint">Qatnashish uchun obuna bo'lish shart bo'lgan kanallar</div>
         </div>
-        <button class="btn btn-primary" onclick="submitGiveaway()">🎲 O'yinni yaratish</button>`;
+        <button class="btn btn-primary" onclick="submitGiveaway()">🎲 Yaratish</button>`;
+    } else if (createType === 'comment') {
+        f.innerHTML = `
+        <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+            <b>💬 Izohli yutuqli o'yin</b><br>
+            Bot postni guruh/kanalga joylaydi. Foydalanuvchilar <b>izoh yozib</b> qatnashadilar.
+            G'olib izohchilardan tasodifiy/birinchi N/kalit so'z bo'yicha tanlanadi.
+        </div>
+        <div class="form-group">
+            <label class="form-label">O'yin nomi *</label>
+            <input class="form-input" id="cTitle" placeholder="masalan: Izohda g'olib aniqlanadi!">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Sovg'a *</label>
+            <input class="form-input" id="cPrize" placeholder="masalan: $100, Premium obuna">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Tavsif (ixtiyoriy)</label>
+            <textarea class="form-textarea" id="cDesc" placeholder="Izohda nima yozish kerak? Qanday qoidalar bor?"></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Tanlash usuli</label>
+            <select class="form-select" id="cMode">
+                <option value="random">🎲 Tasodifiy izohchi</option>
+                <option value="first_n">⚡ Birinchi N izohchi</option>
+                <option value="keyword">🔑 Kalit so'z talab qilinadi</option>
+                <option value="reaction">👍 Reaksiya orqali qatnashish</option>
+            </select>
+            <div class="form-hint" id="modeHint">Izoh yozganlardan tasodifiy g'olib tanlanadi</div>
+        </div>
+        <div class="form-group hidden" id="keywordGroup">
+            <label class="form-label">Kalit so'z</label>
+            <input class="form-input" id="cKeyword" placeholder="masalan: #konkurs yoki maxsus so'z">
+            <div class="form-hint">Izohda shu so'z bo'lishi shart</div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">G'oliblar soni</label>
+            <input class="form-input" id="cWinners" type="number" value="1" min="1">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Davomiyligi</label>
+            <select class="form-select" id="cDuration">
+                <option value="1h">1 soat</option>
+                <option value="6h">6 soat</option>
+                <option value="12h">12 soat</option>
+                <option value="24h" selected>24 soat</option>
+                <option value="3d">3 kun</option>
+                <option value="7d">7 kun</option>
+                <option value="none">Chegarasiz (qo'lda o'tkazish)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Majburiy obuna (ixtiyoriy)</label>
+            <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
+        </div>
+        <button class="btn btn-primary" onclick="submitCommentGiveaway()">💬 Yaratish</button>
+        <p style="font-size:11px;color:var(--text-hint);margin-top:10px;">⚠️ Bu o'yin guruh yoki kanalda joylanadi. Bot o'sha chatda admin bo'lishi kerak.</p>`;
+
+        // Add mode change listener
+        setTimeout(() => {
+            const sel = document.getElementById('cMode');
+            const hint = document.getElementById('modeHint');
+            const kwGroup = document.getElementById('keywordGroup');
+            if (sel) sel.onchange = () => {
+                const hints = {random:'Izoh yozganlardan tasodifiy g\'olib tanlanadi', first_n:'Birinchi N izohchi g\'olib bo\'ladi', keyword:'Izohda kalit so\'z bo\'lishi shart', reaction:'Postga reaksiya qo\'yganlardan tanlanadi'};
+                hint.textContent = hints[sel.value] || '';
+                kwGroup.classList.toggle('hidden', sel.value !== 'keyword');
+            };
+        }, 50);
     } else {
         f.innerHTML = `
+        <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+            <b>🏅 Konkurs</b><br>
+            Ishtirokchilar ariza (matn/rasm) yuboradilar. Boshqa foydalanuvchilar ovoz beradi.
+            Eng ko'p ovoz olgan ishtirokchilar g'olib bo'ladi.
+        </div>
         <div class="form-group">
-            <label class="form-label">Konkurs nomi</label>
+            <label class="form-label">Konkurs nomi *</label>
             <input class="form-input" id="cTitle" placeholder="masalan: Eng yaxshi dizayn konkursi">
         </div>
         <div class="form-group">
@@ -481,22 +563,49 @@ function renderCreateForm() {
         </div>
         <div class="form-group">
             <label class="form-label">Tavsif</label>
-            <textarea class="form-textarea" id="cDesc" placeholder="Ishtirokchilar nima qilishi kerak?"></textarea>
+            <textarea class="form-textarea" id="cDesc" placeholder="Ishtirokchilar nima qilishi kerak? Qanday mezonlar bor?"></textarea>
         </div>
         <div class="form-group">
             <label class="form-label">Ishtirok turi</label>
             <select class="form-select" id="cContestType">
-                <option value="text">📝 Matn</option>
-                <option value="photo">📷 Rasm</option>
-                <option value="any">📎 Har qanday</option>
+                <option value="text">📝 Matn — faqat matn qabul qilinadi</option>
+                <option value="photo">📷 Rasm — faqat rasm qabul qilinadi</option>
+                <option value="any" selected>📎 Har qanday — matn va rasm</option>
             </select>
         </div>
         <div class="form-group">
             <label class="form-label">G'oliblar soni</label>
             <input class="form-input" id="cWinners" type="number" value="1" min="1">
         </div>
-        <button class="btn btn-primary" onclick="submitContest()">🏅 Konkursni yaratish</button>`;
+        <div class="form-group">
+            <label class="form-label">Har bir kishi nechta ariza yubora oladi</label>
+            <input class="form-input" id="cMaxSubs" type="number" value="1" min="1">
+        </div>
+        <button class="btn btn-primary" onclick="submitContest()">🏅 Yaratish</button>`;
     }
+}
+
+function renderBroadcastForm() {
+    const f = document.getElementById('broadcastForm');
+    if (!f) return;
+    f.innerHTML = `
+    <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">
+        Barcha bot foydalanuvchilariga xabar yuborish. Faqat adminlar uchun.
+    </p>
+    <div class="form-group">
+        <label class="form-label">Xabar matni *</label>
+        <textarea class="form-textarea" id="bcText" placeholder="Barcha foydalanuvchilarga yuboriladigan xabar..." style="min-height:100px;"></textarea>
+        <div class="form-hint">HTML formatlash qo'llab-quvvatlanadi: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;</div>
+    </div>
+    <div class="form-group">
+        <label class="form-label">Kimga yuborish</label>
+        <select class="form-select" id="bcTarget">
+            <option value="all">👥 Barcha foydalanuvchilar</option>
+            <option value="participants">🎮 O'yinda qatnashganlar</option>
+            <option value="subscribers">🔔 Bildirishnomaga obuna bo'lganlar</option>
+        </select>
+    </div>
+    <button class="btn btn-primary" onclick="sendBroadcast()">📢 Xabar yuborish</button>`;
 }
 </script>
 
@@ -515,7 +624,28 @@ async function submitGiveaway() {
     };
     const res = await api('/create-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Yutuqli o'yin yaratildi!");
+    showToast("✅ Yutuqli o'yin yaratildi! ID: " + res.id);
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    switchTab('home');
+}
+
+async function submitCommentGiveaway() {
+    const title = document.getElementById('cTitle').value.trim();
+    const prize = document.getElementById('cPrize').value.trim();
+    if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
+    const mode = document.getElementById('cMode').value;
+    const body = {
+        title, prize,
+        description: document.getElementById('cDesc').value.trim() || null,
+        winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+        duration: document.getElementById('cDuration').value,
+        mode: mode,
+        keyword: mode === 'keyword' ? (document.getElementById('cKeyword').value.trim() || null) : null,
+        required_channels: document.getElementById('cChannels').value.trim() || null,
+    };
+    const res = await api('/create-comment-giveaway', 'POST', body);
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast("✅ Izohli o'yin yaratildi! Guruhda /groupgiveaway bilan joylang.");
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }
@@ -529,14 +659,28 @@ async function submitContest() {
         description: document.getElementById('cDesc').value.trim() || null,
         contest_type: document.getElementById('cContestType').value,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+        max_submissions: parseInt(document.getElementById('cMaxSubs')?.value) || 1,
     };
     const res = await api('/create-contest', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Konkurs yaratildi!");
+    showToast("✅ Konkurs yaratildi! ID: " + res.id);
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }
 
+async function sendBroadcast() {
+    const text = document.getElementById('bcText').value.trim();
+    if (!text) { showToast("Xabar matnini kiriting!", 'error'); return; }
+    const target = document.getElementById('bcTarget').value;
+
+    if (!confirm(`Rostdan ham "${target}" ga xabar yubormoqchimisiz?`)) return;
+
+    const res = await api('/admin/broadcast', 'POST', {text, target});
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(`📢 ${res.sent || 0} ta foydalanuvchiga yuborildi!`);
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    document.getElementById('bcText').value = '';
+}
 // ─── Initialize ─────────────────────────────────────────────────
 initApp();
 </script>

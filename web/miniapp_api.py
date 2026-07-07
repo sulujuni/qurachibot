@@ -1048,3 +1048,144 @@ async def miniapp_toggle_alerts(x_telegram_init_data: str | None = Header(None))
             session.add(AlertSubscription(user_id=user_id))
             await session.commit()
             return {"subscribed": True}
+
+
+
+# ─── Comment Giveaway creation ───────────────────────────────────────────────
+
+
+@router.post("/create-comment-giveaway")
+async def miniapp_create_comment_giveaway(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Create a comment-based (group/channel) giveaway from the Mini App."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+    username = user.get("username")
+
+    body = await request.json()
+    title = body.get("title", "").strip()
+    prize = body.get("prize", "").strip()
+    if not title or not prize:
+        return {"error": "Nom va sovg'a kiritilishi shart"}
+
+    from bot.models.group_giveaway import GroupGiveaway, GroupGiveawayMode
+    from bot.utils.subscription import serialize_channels, parse_channels as _pc
+
+    mode_map = {
+        "random": GroupGiveawayMode.RANDOM,
+        "first_n": GroupGiveawayMode.FIRST_N,
+        "keyword": GroupGiveawayMode.KEYWORD,
+        "reaction": GroupGiveawayMode.REACTION,
+    }
+    mode = mode_map.get(body.get("mode", "random"), GroupGiveawayMode.RANDOM)
+
+    duration_map = {
+        "1h": timedelta(hours=1), "6h": timedelta(hours=6),
+        "12h": timedelta(hours=12), "24h": timedelta(hours=24),
+        "3d": timedelta(days=3), "7d": timedelta(days=7), "none": None,
+    }
+    duration = duration_map.get(body.get("duration", "24h"))
+    ends_at = datetime.utcnow() + duration if duration else None
+
+    channels_str = None
+    raw_channels = body.get("required_channels")
+    if raw_channels:
+        channels_str = serialize_channels(_pc(raw_channels))
+
+    keyword = body.get("keyword") if mode == GroupGiveawayMode.KEYWORD else None
+
+    async with async_session() as session:
+        gw = GroupGiveaway(
+            title=title,
+            prize=prize,
+            description=body.get("description") or None,
+            winner_count=max(1, int(body.get("winner_count", 1))),
+            mode=mode,
+            keyword=keyword,
+            required_channels=channels_str,
+            creator_id=user_id,
+            creator_username=username,
+            chat_id=user_id,  # placeholder — set when posted to group/channel
+            ends_at=ends_at,
+            is_channel_post=False,
+        )
+        session.add(gw)
+        await session.commit()
+        await session.refresh(gw)
+
+    return {"success": True, "id": gw.id, "title": gw.title}
+
+
+# ─── Admin Broadcast ─────────────────────────────────────────────────────────
+
+
+@router.post("/admin/broadcast")
+async def admin_broadcast(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Admin: broadcast a message to users.
+
+    Targets:
+      - all: all users who have ever interacted with the bot (user_settings table)
+      - participants: users who joined at least one giveaway
+      - subscribers: users who subscribed to alerts (AlertSubscription)
+    """
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    body = await request.json()
+    text = body.get("text", "").strip()
+    target = body.get("target", "all")
+
+    if not text:
+        return {"error": "Xabar matni bo'sh bo'lmasligi kerak"}
+
+    from bot.models.user_settings import UserSettings
+    from bot.models.notification import AlertSubscription
+
+    # Collect target user IDs
+    user_ids = set()
+    async with async_session() as session:
+        if target == "all":
+            result = await session.execute(select(UserSettings.user_id))
+            user_ids = {r[0] for r in result.all()}
+            # Also include giveaway participants
+            result = await session.execute(
+                select(func.distinct(GiveawayParticipant.user_id))
+            )
+            user_ids.update(r[0] for r in result.all())
+
+        elif target == "participants":
+            result = await session.execute(
+                select(func.distinct(GiveawayParticipant.user_id))
+            )
+            user_ids = {r[0] for r in result.all()}
+
+        elif target == "subscribers":
+            result = await session.execute(select(AlertSubscription.user_id))
+            user_ids = {r[0] for r in result.all()}
+
+    if not user_ids:
+        return {"error": "Yuborish uchun foydalanuvchilar topilmadi", "sent": 0}
+
+    # Send messages (in background — don't block the response)
+    # For now, we'll send synchronously but with error handling per user.
+    # In production, this should be a background task.
+    from telegram import Bot
+    bot = Bot(token=settings.BOT_TOKEN)
+
+    sent = 0
+    failed = 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, text, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    logger.info("Broadcast: sent=%d, failed=%d, target=%s, by user=%d", sent, failed, target, user["id"])
+    return {"success": True, "sent": sent, "failed": failed, "total": len(user_ids)}

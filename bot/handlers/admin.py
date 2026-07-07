@@ -307,6 +307,69 @@ async def admin_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 # ─── Ban/Unban Commands ──────────────────────────────────────────────────────────
 
 
+# ─── Broadcast Command ────────────────────────────────────────────────────────
+
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Broadcast a message to all users. Command: /broadcast <message>
+
+    Usage:
+      /broadcast Salom! Yangi o'yin boshlandi!
+      /broadcast <b>Muhim xabar!</b> Kanalimizga obuna bo'ling.
+    """
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Faqat adminlar uchun.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "📢 <b>Xabar tarqatish</b>\n\n"
+            "Foydalanish:\n"
+            "<code>/broadcast Sizning xabaringiz...</code>\n\n"
+            "HTML formatlash qo'llab-quvvatlanadi:\n"
+            "<code>&lt;b&gt;qalin&lt;/b&gt;</code>, <code>&lt;i&gt;kursiv&lt;/i&gt;</code>, "
+            "<code>&lt;a href=\"url\"&gt;havola&lt;/a&gt;</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    broadcast_text = update.message.text.split(None, 1)[1]  # everything after /broadcast
+
+    # Get all user IDs
+    from bot.models.user_settings import UserSettings
+    result_msg = await update.message.reply_text("📢 Yuborilmoqda...")
+
+    async with async_session() as session:
+        result = await session.execute(select(UserSettings.user_id))
+        user_ids = [r[0] for r in result.all()]
+        # Also participants
+        result = await session.execute(
+            select(func.distinct(GiveawayParticipant.user_id))
+        )
+        user_ids_set = set(user_ids)
+        user_ids_set.update(r[0] for r in result.all())
+
+    sent = 0
+    failed = 0
+    for uid in user_ids_set:
+        try:
+            await context.bot.send_message(uid, broadcast_text, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    await result_msg.edit_text(
+        f"📢 <b>Xabar tarqatish tugadi!</b>\n\n"
+        f"✅ Yuborildi: {sent}\n"
+        f"❌ Xatolik: {failed}\n"
+        f"📊 Jami: {len(user_ids_set)}",
+        parse_mode="HTML",
+    )
+
+
+# ─── Ban/Unban Commands ──────────────────────────────────────────────────────────
+
+
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Ban a user. Command: /ban <user_id> [reason]"""
     if not is_admin(update.effective_user.id):
@@ -360,6 +423,7 @@ def get_admin_handlers() -> list:
         CommandHandler("admin", admin_panel),
         CommandHandler("ban", ban_user),
         CommandHandler("unban", unban_user),
+        CommandHandler("broadcast", broadcast_command),
         CallbackQueryHandler(admin_stats_callback, pattern=r"^admin_stats$"),
         CallbackQueryHandler(admin_gw_stats_callback, pattern=r"^admin_gw_stats$"),
         CallbackQueryHandler(admin_ct_stats_callback, pattern=r"^admin_ct_stats$"),
