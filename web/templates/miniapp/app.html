@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Qurachi</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+    <!-- Top bar -->
+    <header class="topbar">
+        <div class="topbar-title">🎲 Qurachi</div>
+    </header>
+
+    <!-- Tab content area -->
+    <main id="content" class="content"></main>
+
+    <!-- Bottom navigation -->
+    <nav class="navbar">
+        <button class="nav-btn active" data-tab="home" onclick="switchTab('home')">
+            <span class="nav-icon">🏠</span><span class="nav-label">Bosh sahifa</span>
+        </button>
+        <button class="nav-btn" data-tab="games" onclick="switchTab('games')">
+            <span class="nav-icon">🎮</span><span class="nav-label">O'yinlarim</span>
+        </button>
+        <button class="nav-btn" data-tab="leaders" onclick="switchTab('leaders')">
+            <span class="nav-icon">🏆</span><span class="nav-label">Reyting</span>
+        </button>
+        <button class="nav-btn" data-tab="create" onclick="switchTab('create')">
+            <span class="nav-icon">➕</span><span class="nav-label">Yaratish</span>
+        </button>
+    </nav>
+</div>
+</body>
+</html>
+
+
+<style>
+:root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg-secondary: var(--tg-theme-secondary-bg-color, #f4f4f5);
+    --text: var(--tg-theme-text-color, #1a1a2e);
+    --text-hint: var(--tg-theme-hint-color, #999);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --btn: var(--tg-theme-button-color, #7c4dff);
+    --btn-text: var(--tg-theme-button-text-color, #fff);
+    --border: rgba(0,0,0,0.06);
+    --card-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --nav-height: 64px;
+    --topbar-height: 52px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg-secondary);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+.topbar {
+    position: fixed; top:0; left:0; right:0; z-index:100;
+    height: var(--topbar-height);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+}
+.topbar-title { font-weight: 800; font-size: 18px; }
+</style>
+
+
+<style>
+.content {
+    padding: calc(var(--topbar-height) + 12px) 16px calc(var(--nav-height) + 16px);
+    max-width: 480px; margin: 0 auto;
+}
+.navbar {
+    position: fixed; bottom:0; left:0; right:0; z-index:100;
+    height: var(--nav-height);
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: space-around;
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.nav-btn {
+    background: none; border: none; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 6px 12px; border-radius: 12px; transition: all 0.2s;
+    color: var(--text-hint);
+}
+.nav-btn.active { color: var(--btn); }
+.nav-icon { font-size: 22px; }
+.nav-label { font-size: 11px; font-weight: 600; }
+.card {
+    background: var(--bg); border-radius: var(--radius);
+    padding: 18px; margin-bottom: 12px;
+    box-shadow: var(--card-shadow);
+}
+.card-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.stats-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+.stat-box { background: var(--bg-secondary); border-radius: var(--radius-sm); padding: 14px; text-align: center; }
+.stat-val { font-size: 24px; font-weight: 800; color: var(--btn); }
+.stat-lbl { font-size: 11px; color: var(--text-hint); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.5px; }
+</style>
+
+
+<style>
+.game-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--border);
+}
+.game-item:last-child { border-bottom: none; }
+.game-icon { font-size: 28px; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+    background: var(--bg-secondary); border-radius: 12px; }
+.game-info { flex: 1; }
+.game-title { font-weight: 600; font-size: 14px; }
+.game-meta { font-size: 12px; color: var(--text-hint); margin-top: 2px; }
+.game-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; }
+.badge-active { background: #e8f5e9; color: #2e7d32; }
+.badge-ended { background: #fce4ec; color: #c62828; }
+.badge-won { background: #fff3e0; color: #e65100; }
+.lb-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.lb-item:last-child { border-bottom: none; }
+.lb-rank { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 14px; border-radius: 50%; background: var(--bg-secondary); }
+.lb-rank.gold { background: #fff8e1; color: #f57f17; }
+.lb-rank.silver { background: #eceff1; color: #546e7a; }
+.lb-rank.bronze { background: #fbe9e7; color: #bf360c; }
+.lb-name { flex: 1; font-weight: 500; font-size: 14px; }
+.lb-pts { font-weight: 700; color: var(--btn); font-size: 14px; }
+</style>
+
+
+<style>
+.form-group { margin-bottom: 16px; }
+.form-label { font-size: 13px; font-weight: 600; margin-bottom: 6px; display: block; color: var(--text); }
+.form-input, .form-select, .form-textarea {
+    width: 100%; padding: 12px 14px; border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); font-size: 15px; background: var(--bg);
+    color: var(--text); font-family: inherit; transition: border-color 0.2s;
+}
+.form-input:focus, .form-select:focus, .form-textarea:focus {
+    outline: none; border-color: var(--btn);
+}
+.form-textarea { resize: vertical; min-height: 80px; }
+.form-hint { font-size: 12px; color: var(--text-hint); margin-top: 4px; }
+.btn {
+    display: block; width: 100%; padding: 14px; border: none; border-radius: var(--radius-sm);
+    font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+    text-align: center;
+}
+.btn-primary { background: var(--btn); color: var(--btn-text); }
+.btn-primary:active { opacity: 0.85; transform: scale(0.98); }
+.btn-secondary { background: var(--bg-secondary); color: var(--text); margin-top: 8px; }
+.empty-state { text-align: center; padding: 40px 20px; color: var(--text-hint); }
+.empty-state .emoji { font-size: 48px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; line-height: 1.5; }
+.chip-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.chip { padding: 8px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    background: var(--bg-secondary); border: 1.5px solid var(--border); cursor: pointer; transition: all 0.2s; }
+.chip.selected { background: var(--btn); color: var(--btn-text); border-color: var(--btn); }
+.toast { position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+    padding: 10px 20px; border-radius: 10px; font-size: 14px; font-weight: 600;
+    z-index: 999; animation: fadeIn 0.3s; }
+.toast-success { background: #4caf50; color: white; }
+.toast-error { background: #f44336; color: white; }
+@keyframes fadeIn { from { opacity:0; transform: translateX(-50%) translateY(-10px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+</style>
+
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+const BASE = window.location.origin;
+const headers = { 'Content-Type': 'application/json', 'X-Telegram-Init-Data': tg.initData };
+
+async function api(path, method='GET', body=null) {
+    const opts = { method, headers };
+    if (body) opts.body = JSON.stringify(body);
+    const r = await fetch(`${BASE}/miniapp/api${path}`, opts);
+    return r.json();
+}
+
+let currentTab = 'home';
+function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate };
+    loaders[tab]();
+}
+
+function showToast(msg, type='success') {
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2500);
+}
+
+function timeAgo(iso) {
+    if (!iso) return '';
+    const d = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (d < 60) return 'hozirgina';
+    if (d < 3600) return Math.floor(d/60) + ' min oldin';
+    if (d < 86400) return Math.floor(d/3600) + ' soat oldin';
+    return Math.floor(d/86400) + ' kun oldin';
+}
+
+function timeLeft(iso) {
+    if (!iso) return 'Chegarasiz';
+    const d = (new Date(iso).getTime() - Date.now()) / 1000;
+    if (d <= 0) return 'Tugagan';
+    if (d < 3600) return Math.floor(d/60) + ' min qoldi';
+    if (d < 86400) return Math.floor(d/3600) + ' soat qoldi';
+    return Math.floor(d/86400) + ' kun qoldi';
+}
+</script>
+
+
+<script>
+// ─── HOME TAB ─────────────────────────────────────────────────
+async function renderHome() {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state"><div class="loading-dots">⏳</div></div>';
+    const [stats, games] = await Promise.all([api('/stats'), api('/active-giveaways')]);
+    let html = `
+    <div class="stats-row">
+        <div class="stat-box"><div class="stat-val">${stats.giveaways?.active||0}</div><div class="stat-lbl">Faol o'yinlar</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.users?.unique||0}</div><div class="stat-lbl">Ishtirokchilar</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.giveaways?.total||0}</div><div class="stat-lbl">Jami o'yinlar</div></div>
+        <div class="stat-box"><div class="stat-val">${stats.contests?.total||0}</div><div class="stat-lbl">Konkurslar</div></div>
+    </div>
+    <div class="card"><div class="card-title">🔥 Faol yutuqli o'yinlar</div>`;
+    if (!games.length) {
+        html += '<div class="empty-state"><div class="emoji">🎲</div><p>Hozircha faol o\'yinlar yo\'q</p></div>';
+    } else {
+        games.forEach(g => {
+            html += `<div class="game-item" onclick="openGiveaway(${g.id})">
+                <div class="game-icon">🎁</div>
+                <div class="game-info">
+                    <div class="game-title">${g.title}</div>
+                    <div class="game-meta">🎁 ${g.prize} · 👤 ${g.participants} · ${timeLeft(g.ends_at)}</div>
+                </div>
+                <span class="game-badge badge-active">Faol</span>
+            </div>`;
+        });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+function openGiveaway(id) {
+    window.location.href = `/miniapp/giveaway?id=${id}`;
+}
+</script>
+
+
+<script>
+// ─── MY GAMES TAB ──────────────────────────────────────────────
+async function renderGames() {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+    const data = await api('/my-games');
+    let html = '';
+    if (data.referral) {
+        html += `<div class="card"><div class="card-title">👥 Taklif (Referal)</div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-val">${data.referral.count}</div><div class="stat-lbl">Takliflar</div></div>
+                <div class="stat-box"><div class="stat-val">${data.referral.points}</div><div class="stat-lbl">Ballar</div></div>
+            </div></div>`;
+    }
+    html += `<div class="card"><div class="card-title">🎮 Qatnashgan o'yinlarim</div>`;
+    if (!data.participated?.length) {
+        html += '<div class="empty-state"><div class="emoji">🎲</div><p>Siz hali biror o\'yinda qatnashmagansiz</p></div>';
+    } else {
+        data.participated.forEach(g => {
+            const badge = g.won ? '<span class="game-badge badge-won">🏆 Yutdim</span>'
+                : g.status === 'active' ? '<span class="game-badge badge-active">Faol</span>'
+                : '<span class="game-badge badge-ended">Tugagan</span>';
+            html += `<div class="game-item">
+                <div class="game-icon">${g.won ? '🏆' : '🎁'}</div>
+                <div class="game-info">
+                    <div class="game-title">${g.title}</div>
+                    <div class="game-meta">🎁 ${g.prize} · ${timeAgo(g.created_at)}</div>
+                </div>${badge}</div>`;
+        });
+    }
+    html += '</div>';
+    html += `<div class="card"><div class="card-title">📋 Yaratgan o'yinlarim</div>`;
+    if (!data.created?.length) {
+        html += '<div class="empty-state"><p>Siz hali o\'yin yaratmagansiz</p></div>';
+    } else {
+        data.created.forEach(g => {
+            const badge = g.status === 'active' ? '<span class="game-badge badge-active">Faol</span>'
+                : '<span class="game-badge badge-ended">Tugagan</span>';
+            html += `<div class="game-item">
+                <div class="game-icon">📢</div>
+                <div class="game-info">
+                    <div class="game-title">${g.title}</div>
+                    <div class="game-meta">👤 ${g.participants} ishtirokchi · ${timeAgo(g.created_at)}</div>
+                </div>${badge}</div>`;
+        });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+</script>
+
+
+<script>
+// ─── LEADERBOARD TAB ───────────────────────────────────────────
+async function renderLeaders() {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+    const data = await api('/leaderboard');
+    let html = `<div class="card"><div class="card-title">🏆 Eng faol foydalanuvchilar</div>`;
+    if (!data.length) {
+        html += '<div class="empty-state"><div class="emoji">🏆</div><p>Hali reyting ma\'lumotlari yo\'q</p></div>';
+    } else {
+        data.forEach((u, i) => {
+            const rank = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+            const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : (i+1);
+            const name = u.username ? `@${u.username}` : (u.first_name || 'Noma\'lum');
+            html += `<div class="lb-item">
+                <div class="lb-rank ${rank}">${medal}</div>
+                <div class="lb-name">${name}</div>
+                <div class="lb-pts">${u.points} ball</div>
+            </div>`;
+        });
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+</script>
+
+
+<script>
+// ─── CREATE TAB ────────────────────────────────────────────────
+let createType = 'giveaway';
+
+function renderCreate() {
+    const el = document.getElementById('content');
+    el.innerHTML = `
+    <div class="card">
+        <div class="card-title">➕ Yangi o'yin/konkurs yaratish</div>
+        <div class="chip-row">
+            <span class="chip ${createType==='giveaway'?'selected':''}" onclick="setType('giveaway')">🎲 Yutuqli o'yin</span>
+            <span class="chip ${createType==='contest'?'selected':''}" onclick="setType('contest')">🏅 Konkurs</span>
+        </div>
+        <div id="createForm"></div>
+    </div>`;
+    renderCreateForm();
+}
+
+function setType(t) { createType = t; renderCreate(); }
+
+function renderCreateForm() {
+    const f = document.getElementById('createForm');
+    if (createType === 'giveaway') {
+        f.innerHTML = `
+        <div class="form-group">
+            <label class="form-label">Nomi</label>
+            <input class="form-input" id="cTitle" placeholder="masalan: iPhone 15 Pro sovg'a o'yini">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Sovg'a</label>
+            <input class="form-input" id="cPrize" placeholder="masalan: iPhone 15 Pro, $500">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Tavsif (ixtiyoriy)</label>
+            <textarea class="form-textarea" id="cDesc" placeholder="O'yin qoidalari, shartlari..."></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">G'oliblar soni</label>
+            <input class="form-input" id="cWinners" type="number" value="1" min="1">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Davomiyligi</label>
+            <select class="form-select" id="cDuration">
+                <option value="1h">1 soat</option>
+                <option value="6h">6 soat</option>
+                <option value="12h">12 soat</option>
+                <option value="24h" selected>24 soat</option>
+                <option value="3d">3 kun</option>
+                <option value="7d">7 kun</option>
+                <option value="none">Chegarasiz</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Majburiy kanallar (ixtiyoriy)</label>
+            <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
+            <div class="form-hint">Qatnashish uchun obuna bo'lish shart bo'lgan kanallar</div>
+        </div>
+        <button class="btn btn-primary" onclick="submitGiveaway()">🎲 O'yinni yaratish</button>`;
+    } else {
+        f.innerHTML = `
+        <div class="form-group">
+            <label class="form-label">Konkurs nomi</label>
+            <input class="form-input" id="cTitle" placeholder="masalan: Eng yaxshi dizayn konkursi">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Sovg'a (ixtiyoriy)</label>
+            <input class="form-input" id="cPrize" placeholder="masalan: $200, Premium obuna">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Tavsif</label>
+            <textarea class="form-textarea" id="cDesc" placeholder="Ishtirokchilar nima qilishi kerak?"></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Ishtirok turi</label>
+            <select class="form-select" id="cContestType">
+                <option value="text">📝 Matn</option>
+                <option value="photo">📷 Rasm</option>
+                <option value="any">📎 Har qanday</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label class="form-label">G'oliblar soni</label>
+            <input class="form-input" id="cWinners" type="number" value="1" min="1">
+        </div>
+        <button class="btn btn-primary" onclick="submitContest()">🏅 Konkursni yaratish</button>`;
+    }
+}
+</script>
+
+
+<script>
+async function submitGiveaway() {
+    const title = document.getElementById('cTitle').value.trim();
+    const prize = document.getElementById('cPrize').value.trim();
+    if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
+    const body = {
+        title, prize,
+        description: document.getElementById('cDesc').value.trim() || null,
+        winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+        duration: document.getElementById('cDuration').value,
+        required_channels: document.getElementById('cChannels').value.trim() || null,
+    };
+    const res = await api('/create-giveaway', 'POST', body);
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast("✅ Yutuqli o'yin yaratildi!");
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    switchTab('home');
+}
+
+async function submitContest() {
+    const title = document.getElementById('cTitle').value.trim();
+    if (!title) { showToast("Konkurs nomini kiriting!", 'error'); return; }
+    const body = {
+        title,
+        prize: document.getElementById('cPrize').value.trim() || null,
+        description: document.getElementById('cDesc').value.trim() || null,
+        contest_type: document.getElementById('cContestType').value,
+        winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+    };
+    const res = await api('/create-contest', 'POST', body);
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast("✅ Konkurs yaratildi!");
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    switchTab('home');
+}
+
+// ─── Initialize ─────────────────────────────────────────────────
+const initTab = new URLSearchParams(window.location.search).get('tab') || 'home';
+switchTab(initTab);
+</script>

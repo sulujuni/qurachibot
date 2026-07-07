@@ -110,16 +110,17 @@ async def post_init(application: Application) -> None:
     web_url = settings.WEB_URL
     if web_url:
         try:
+            miniapp_url = f"{web_url.rstrip('/')}/miniapp"
             menu_button = MenuButtonWebApp(
-                text="📊 Dashboard",
-                web_app=WebAppInfo(url=web_url),
+                text="🎲 Qurachi",
+                web_app=WebAppInfo(url=miniapp_url),
             )
             await application.bot.set_chat_menu_button(menu_button=menu_button)
-            logger.info("Web App menu button set: %s", web_url)
+            logger.info("Web App menu button set: %s", miniapp_url)
         except Exception as e:
             logger.warning("Failed to set menu button (need HTTPS URL): %s", e)
     else:
-        logger.info("WEB_URL not set — skipping dashboard menu button.")
+        logger.info("WEB_URL not set — skipping Mini App menu button.")
 
     # Schedule recurring jobs
     job_queue = application.job_queue

@@ -38,6 +38,12 @@ async def miniapp_giveaway_page(request: Request, id: int = 0):
     return templates.TemplateResponse("miniapp/giveaway.html", {"request": request})
 
 
+@app.get("/miniapp", response_class=HTMLResponse)
+async def miniapp_main(request: Request, tab: str = "home"):
+    """Serve the full Mini App (main tabs: home, games, leaders, create)."""
+    return templates.TemplateResponse("miniapp/app.html", {"request": request})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """Main dashboard page with stats."""

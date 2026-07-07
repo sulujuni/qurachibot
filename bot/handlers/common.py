@@ -91,27 +91,55 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show a link to the web dashboard. Command: /dashboard"""
+    """Open the Mini App. Command: /dashboard"""
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
     web_url = settings.WEB_URL
     if not web_url:
         await update.message.reply_text(
-            "📊 The web dashboard is not configured yet.\n"
-            "Set <code>WEB_URL</code> in the environment to enable it.",
+            "📊 Mini App hali sozlanmagan.\n"
+            "<code>WEB_URL</code> ni .env faylida kiriting.",
             parse_mode="HTML",
         )
         return
 
+    miniapp_url = f"{web_url.rstrip('/')}/miniapp"
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Open Dashboard", web_app=WebAppInfo(url=web_url))]
+        [InlineKeyboardButton("🎲 Qurachi ilovasini ochish", web_app=WebAppInfo(url=miniapp_url))]
     ])
     await update.message.reply_text(
-        "📊 <b>QurachiBot Dashboard</b>\n\n"
-        "View live stats, leaderboard, giveaways, and contests.",
+        "🎲 <b>Qurachi Mini App</b>\n\n"
+        "Yutuqli o'yinlar, konkurslar, reyting va boshqa hamma narsa — bir joyda.",
         reply_markup=keyboard,
         parse_mode="HTML",
     )
+
+
+async def open_miniapp_tab(update: Update, context: ContextTypes.DEFAULT_TYPE, tab: str) -> None:
+    """Helper to open the Mini App on a specific tab."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+
+    web_url = settings.WEB_URL
+    if not web_url:
+        await update.message.reply_text("Mini App hali sozlanmagan.")
+        return
+
+    url = f"{web_url.rstrip('/')}/miniapp?tab={tab}"
+    labels = {"games": "🎮 O'yinlarim", "leaders": "🏆 Reyting", "create": "➕ Yaratish"}
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(labels.get(tab, "🎲 Ochish"), web_app=WebAppInfo(url=url))]
+    ])
+    await update.message.reply_text("👆 Tugmani bosing:", reply_markup=keyboard, parse_mode="HTML")
+
+
+async def mygames_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Open My Games tab. Command: /mygiveaways"""
+    await open_miniapp_tab(update, context, "games")
+
+
+async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Open Leaderboard tab. Command: /leaderboard"""
+    await open_miniapp_tab(update, context, "leaders")
 
 
 def get_common_handlers() -> list:
@@ -120,6 +148,8 @@ def get_common_handlers() -> list:
         CommandHandler("start", start_command),
         CommandHandler("help", help_command),
         CommandHandler("dashboard", dashboard_command),
+        CommandHandler("mygiveaways", mygames_command),
+        CommandHandler("leaderboard", leaderboard_command),
         CommandHandler("lang", lang_command),
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
     ]

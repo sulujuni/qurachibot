@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -274,3 +274,245 @@ async def get_participants(giveaway_id: int):
             for p in participants
         ],
     }
+
+
+
+# ─── Additional endpoints for the full Mini App ──────────────────────────────
+
+
+@router.get("/stats")
+async def miniapp_stats():
+    """Global stats for the Mini App home tab."""
+    async with async_session() as session:
+        gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar() or 0
+        gw_active = (await session.execute(
+            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+        )).scalar() or 0
+        total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar() or 0
+        unique_users = (await session.execute(
+            select(func.count(func.distinct(GiveawayParticipant.user_id)))
+        )).scalar() or 0
+
+        from bot.models.contest import Contest, ContestStatus, ContestSubmission
+        ct_total = (await session.execute(select(func.count(Contest.id)))).scalar() or 0
+
+        from bot.models.referral import Referral
+        total_referrals = (await session.execute(select(func.count(Referral.id)))).scalar() or 0
+
+    return {
+        "giveaways": {"total": gw_total, "active": gw_active, "participants": total_participants},
+        "contests": {"total": ct_total},
+        "users": {"unique": unique_users, "referrals": total_referrals},
+    }
+
+
+@router.get("/active-giveaways")
+async def miniapp_active_giveaways():
+    """List active giveaways for the home tab."""
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway)
+            .where(Giveaway.status == GiveawayStatus.ACTIVE)
+            .order_by(Giveaway.created_at.desc())
+            .limit(20)
+        )
+        giveaways = result.scalars().all()
+
+        items = []
+        for gw in giveaways:
+            count = (await session.execute(
+                select(func.count(GiveawayParticipant.id)).where(
+                    GiveawayParticipant.giveaway_id == gw.id
+                )
+            )).scalar() or 0
+            items.append({
+                "id": gw.id,
+                "title": gw.title,
+                "prize": gw.prize,
+                "participants": count,
+                "winner_count": gw.winner_count,
+                "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
+                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+            })
+    return items
+
+
+@router.get("/leaderboard")
+async def miniapp_leaderboard():
+    """Top users for the leaderboard tab."""
+    from bot.models.loyalty import LoyaltyPoints
+    async with async_session() as session:
+        result = await session.execute(
+            select(LoyaltyPoints).order_by(LoyaltyPoints.total_earned.desc()).limit(30)
+        )
+        users = result.scalars().all()
+    return [
+        {
+            "rank": i + 1,
+            "username": u.username,
+            "first_name": u.first_name,
+            "points": u.total_earned or 0,
+            "wins": u.wins or 0,
+        }
+        for i, u in enumerate(users)
+    ]
+
+
+@router.get("/my-games")
+async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
+    """User's participated and created giveaways + referral stats."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    async with async_session() as session:
+        # Participated giveaways
+        result = await session.execute(
+            select(GiveawayParticipant)
+            .where(GiveawayParticipant.user_id == user_id)
+            .order_by(GiveawayParticipant.joined_at.desc())
+            .limit(20)
+        )
+        participations = result.scalars().all()
+
+        participated = []
+        for p in participations:
+            gw = (await session.execute(select(Giveaway).where(Giveaway.id == p.giveaway_id))).scalar_one_or_none()
+            if not gw:
+                continue
+            # Check if user won
+            won = (await session.execute(
+                select(GiveawayWinner).where(
+                    GiveawayWinner.giveaway_id == gw.id,
+                    GiveawayWinner.user_id == user_id,
+                )
+            )).scalar_one_or_none() is not None
+            participated.append({
+                "id": gw.id, "title": gw.title, "prize": gw.prize,
+                "status": gw.status.value, "won": won,
+                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+            })
+
+        # Created giveaways
+        result = await session.execute(
+            select(Giveaway)
+            .where(Giveaway.creator_id == user_id)
+            .order_by(Giveaway.created_at.desc())
+            .limit(20)
+        )
+        created_gws = result.scalars().all()
+        created = []
+        for gw in created_gws:
+            count = (await session.execute(
+                select(func.count(GiveawayParticipant.id)).where(
+                    GiveawayParticipant.giveaway_id == gw.id
+                )
+            )).scalar() or 0
+            created.append({
+                "id": gw.id, "title": gw.title, "prize": gw.prize,
+                "status": gw.status.value, "participants": count,
+                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+            })
+
+        # Referral stats
+        from bot.models.referral import Referral
+        ref_count = (await session.execute(
+            select(func.count(Referral.id)).where(
+                Referral.referrer_id == user_id, Referral.verified == True
+            )
+        )).scalar() or 0
+
+        from bot.utils.loyalty import POINTS_CONFIG
+        ref_points = ref_count * POINTS_CONFIG.get("referral", 20)
+
+    return {
+        "participated": participated,
+        "created": created,
+        "referral": {"count": ref_count, "points": ref_points},
+    }
+
+
+
+@router.post("/create-giveaway")
+async def miniapp_create_giveaway(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Create a giveaway from the Mini App form."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+    username = user.get("username")
+
+    body = await request.json()
+    title = body.get("title", "").strip()
+    prize = body.get("prize", "").strip()
+    if not title or not prize:
+        return {"error": "Nom va sovg'a kiritilishi shart"}
+
+    description = body.get("description") or None
+    winner_count = max(1, int(body.get("winner_count", 1)))
+    required_channels = body.get("required_channels") or None
+
+    # Parse duration
+    duration_map = {
+        "1h": timedelta(hours=1), "6h": timedelta(hours=6),
+        "12h": timedelta(hours=12), "24h": timedelta(hours=24),
+        "3d": timedelta(days=3), "7d": timedelta(days=7), "none": None,
+    }
+    duration = duration_map.get(body.get("duration", "24h"))
+    ends_at = datetime.utcnow() + duration if duration else None
+
+    from bot.utils.subscription import serialize_channels, parse_channels as _pc
+    channels_str = serialize_channels(_pc(required_channels)) if required_channels else None
+
+    async with async_session() as session:
+        giveaway = Giveaway(
+            title=title, description=description, prize=prize,
+            winner_count=winner_count,
+            required_channels=channels_str,
+            creator_id=user_id, creator_username=username,
+            chat_id=user_id,  # will be updated when posted to a channel
+            ends_at=ends_at,
+        )
+        session.add(giveaway)
+        await session.commit()
+        await session.refresh(giveaway)
+
+    return {"success": True, "id": giveaway.id, "title": giveaway.title}
+
+
+@router.post("/create-contest")
+async def miniapp_create_contest(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Create a contest from the Mini App form."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+    username = user.get("username")
+
+    body = await request.json()
+    title = body.get("title", "").strip()
+    if not title:
+        return {"error": "Konkurs nomi kiritilishi shart"}
+
+    from bot.models.contest import Contest, ContestType
+
+    type_map = {"text": ContestType.TEXT, "photo": ContestType.PHOTO, "any": ContestType.ANY}
+    contest_type = type_map.get(body.get("contest_type", "any"), ContestType.ANY)
+
+    async with async_session() as session:
+        contest = Contest(
+            title=title,
+            description=body.get("description") or None,
+            prize=body.get("prize") or None,
+            contest_type=contest_type,
+            winner_count=max(1, int(body.get("winner_count", 1))),
+            max_submissions_per_user=1,
+            creator_id=user_id, creator_username=username,
+            chat_id=user_id,
+        )
+        session.add(contest)
+        await session.commit()
+        await session.refresh(contest)
+
+    return {"success": True, "id": contest.id, "title": contest.title}
