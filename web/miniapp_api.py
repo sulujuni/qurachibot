@@ -462,14 +462,32 @@ async def miniapp_create_giveaway(
     winner_count = max(1, int(body.get("winner_count", 1)))
     required_channels = body.get("required_channels") or None
 
-    # Parse duration
+    # Parse duration or deadline
     duration_map = {
-        "1h": timedelta(hours=1), "6h": timedelta(hours=6),
-        "12h": timedelta(hours=12), "24h": timedelta(hours=24),
-        "3d": timedelta(days=3), "7d": timedelta(days=7), "none": None,
+        "30m": timedelta(minutes=30),
+        "1h": timedelta(hours=1), "3h": timedelta(hours=3),
+        "6h": timedelta(hours=6), "12h": timedelta(hours=12),
+        "24h": timedelta(hours=24), "2d": timedelta(days=2),
+        "3d": timedelta(days=3), "5d": timedelta(days=5),
+        "7d": timedelta(days=7), "14d": timedelta(days=14),
+        "30d": timedelta(days=30), "none": None,
     }
-    duration = duration_map.get(body.get("duration", "24h"))
-    ends_at = datetime.utcnow() + duration if duration else None
+
+    # Support both preset durations and custom deadlines
+    deadline_str = body.get("deadline")  # ISO datetime string from datetime-local input
+    duration_key = body.get("duration", "24h")
+
+    if deadline_str:
+        # Custom deadline: parse ISO datetime
+        try:
+            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return {"error": "Noto'g'ri sana formati"}
+    elif duration_key and duration_key != "none" and duration_key != "custom":
+        duration = duration_map.get(duration_key)
+        ends_at = datetime.utcnow() + duration if duration else None
+    else:
+        ends_at = None
 
     from bot.utils.subscription import serialize_channels, parse_channels as _pc
     channels_str = serialize_channels(_pc(required_channels)) if required_channels else None
@@ -1082,12 +1100,28 @@ async def miniapp_create_comment_giveaway(
     mode = mode_map.get(body.get("mode", "random"), GroupGiveawayMode.RANDOM)
 
     duration_map = {
-        "1h": timedelta(hours=1), "6h": timedelta(hours=6),
-        "12h": timedelta(hours=12), "24h": timedelta(hours=24),
-        "3d": timedelta(days=3), "7d": timedelta(days=7), "none": None,
+        "30m": timedelta(minutes=30),
+        "1h": timedelta(hours=1), "3h": timedelta(hours=3),
+        "6h": timedelta(hours=6), "12h": timedelta(hours=12),
+        "24h": timedelta(hours=24), "2d": timedelta(days=2),
+        "3d": timedelta(days=3), "5d": timedelta(days=5),
+        "7d": timedelta(days=7), "14d": timedelta(days=14),
+        "30d": timedelta(days=30), "none": None,
     }
-    duration = duration_map.get(body.get("duration", "24h"))
-    ends_at = datetime.utcnow() + duration if duration else None
+
+    deadline_str = body.get("deadline")
+    duration_key = body.get("duration", "24h")
+
+    if deadline_str:
+        try:
+            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return {"error": "Noto'g'ri sana formati"}
+    elif duration_key and duration_key != "none" and duration_key != "custom":
+        duration = duration_map.get(duration_key)
+        ends_at = datetime.utcnow() + duration if duration else None
+    else:
+        ends_at = None
 
     channels_str = None
     raw_channels = body.get("required_channels")

@@ -461,16 +461,28 @@ function renderCreateForm() {
             <input class="form-input" id="cWinners" type="number" value="1" min="1">
         </div>
         <div class="form-group">
-            <label class="form-label">Davomiyligi</label>
+            <label class="form-label">Davomiyligi / Tugash vaqti</label>
             <select class="form-select" id="cDuration">
+                <option value="30m">30 daqiqa</option>
                 <option value="1h">1 soat</option>
+                <option value="3h">3 soat</option>
                 <option value="6h">6 soat</option>
                 <option value="12h">12 soat</option>
-                <option value="24h" selected>24 soat</option>
+                <option value="24h" selected>24 soat (1 kun)</option>
+                <option value="2d">2 kun</option>
                 <option value="3d">3 kun</option>
+                <option value="5d">5 kun</option>
                 <option value="7d">7 kun</option>
-                <option value="none">Chegarasiz (qo'lda o'tkazish)</option>
+                <option value="14d">14 kun (2 hafta)</option>
+                <option value="30d">30 kun (1 oy)</option>
+                <option value="custom">📅 Aniq sana/vaqt kiritish...</option>
+                <option value="none">♾ Chegarasiz (qo'lda o'tkazish)</option>
             </select>
+        </div>
+        <div class="form-group hidden" id="gwDeadlineBox">
+            <label class="form-label">Tugash sanasi va vaqti</label>
+            <input class="form-input" id="cDeadline" type="datetime-local">
+            <div class="form-hint">O'yin aynan shu vaqtda tugaydi va g'olib aniqlanadi</div>
         </div>
         <div class="form-group">
             <label class="form-label">Majburiy obuna (ixtiyoriy)</label>
@@ -517,16 +529,28 @@ function renderCreateForm() {
             <input class="form-input" id="cWinners" type="number" value="1" min="1">
         </div>
         <div class="form-group">
-            <label class="form-label">Davomiyligi</label>
+            <label class="form-label">Davomiyligi / Tugash vaqti</label>
             <select class="form-select" id="cDuration">
+                <option value="30m">30 daqiqa</option>
                 <option value="1h">1 soat</option>
+                <option value="3h">3 soat</option>
                 <option value="6h">6 soat</option>
                 <option value="12h">12 soat</option>
-                <option value="24h" selected>24 soat</option>
+                <option value="24h" selected>24 soat (1 kun)</option>
+                <option value="2d">2 kun</option>
                 <option value="3d">3 kun</option>
+                <option value="5d">5 kun</option>
                 <option value="7d">7 kun</option>
-                <option value="none">Chegarasiz (qo'lda o'tkazish)</option>
+                <option value="14d">14 kun (2 hafta)</option>
+                <option value="30d">30 kun (1 oy)</option>
+                <option value="custom">📅 Aniq sana/vaqt kiritish...</option>
+                <option value="none">♾ Chegarasiz (qo'lda o'tkazish)</option>
             </select>
+        </div>
+        <div class="form-group hidden" id="cmtDeadlineBox">
+            <label class="form-label">Tugash sanasi va vaqti</label>
+            <input class="form-input" id="cDeadlineCmt" type="datetime-local">
+            <div class="form-hint">O'yin aynan shu vaqtda tugaydi</div>
         </div>
         <div class="form-group">
             <label class="form-label">Majburiy obuna (ixtiyoriy)</label>
@@ -615,11 +639,22 @@ async function submitGiveaway() {
     const title = document.getElementById('cTitle').value.trim();
     const prize = document.getElementById('cPrize').value.trim();
     if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
+
+    const durVal = document.getElementById('cDuration').value;
+    let duration = durVal;
+    let deadline = null;
+    if (durVal === 'custom') {
+        deadline = document.getElementById('cDeadline').value;
+        if (!deadline) { showToast("Tugash vaqtini kiriting!", 'error'); return; }
+        duration = null;
+    }
+
     const body = {
         title, prize,
         description: document.getElementById('cDesc').value.trim() || null,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
-        duration: document.getElementById('cDuration').value,
+        duration: duration,
+        deadline: deadline,
         required_channels: document.getElementById('cChannels').value.trim() || null,
     };
     const res = await api('/create-giveaway', 'POST', body);
@@ -634,18 +669,29 @@ async function submitCommentGiveaway() {
     const prize = document.getElementById('cPrize').value.trim();
     if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
     const mode = document.getElementById('cMode').value;
+
+    const durVal = document.getElementById('cDuration').value;
+    let duration = durVal;
+    let deadline = null;
+    if (durVal === 'custom') {
+        deadline = document.getElementById('cDeadlineCmt').value;
+        if (!deadline) { showToast("Tugash vaqtini kiriting!", 'error'); return; }
+        duration = null;
+    }
+
     const body = {
         title, prize,
         description: document.getElementById('cDesc').value.trim() || null,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
-        duration: document.getElementById('cDuration').value,
+        duration: duration,
+        deadline: deadline,
         mode: mode,
         keyword: mode === 'keyword' ? (document.getElementById('cKeyword').value.trim() || null) : null,
         required_channels: document.getElementById('cChannels').value.trim() || null,
     };
     const res = await api('/create-comment-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Izohli o'yin yaratildi! Guruhda /groupgiveaway bilan joylang.");
+    showToast("✅ Izohli o'yin yaratildi!");
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }
@@ -683,6 +729,14 @@ async function sendBroadcast() {
 }
 // ─── Initialize ─────────────────────────────────────────────────
 initApp();
+
+// ─── Deadline toggle (show/hide custom date input) ──────────────
+document.addEventListener('change', function(e) {
+    if (e.target.id === 'cDuration') {
+        const box = document.getElementById('gwDeadlineBox') || document.getElementById('cmtDeadlineBox');
+        if (box) box.classList.toggle('hidden', e.target.value !== 'custom');
+    }
+});
 </script>
 
 
