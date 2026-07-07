@@ -22,10 +22,20 @@ app = FastAPI(title="QurachiBot Dashboard", version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
+# Register Mini App API routes
+from web.miniapp_api import router as miniapp_router
+app.include_router(miniapp_router)
+
 
 @app.on_event("startup")
 async def startup():
     await init_db()
+
+
+@app.get("/miniapp/giveaway", response_class=HTMLResponse)
+async def miniapp_giveaway_page(request: Request, id: int = 0):
+    """Serve the Mini App HTML for giveaway participation."""
+    return templates.TemplateResponse("miniapp/giveaway.html", {"request": request})
 
 
 @app.get("/", response_class=HTMLResponse)

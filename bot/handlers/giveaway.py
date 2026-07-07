@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -15,6 +15,7 @@ from telegram.ext import (
     filters,
 )
 
+from bot.config import settings
 from bot.i18n import get_text
 from bot.models import (
     Giveaway,
@@ -34,6 +35,22 @@ from bot.utils.subscription import (
 
 # Conversation states
 TITLE, DESCRIPTION, PRIZE, WINNER_COUNT, CHANNELS, DURATION = range(6)
+
+
+def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineKeyboardMarkup:
+    """Build the 'Join' button for a giveaway announcement.
+
+    If WEB_URL is configured, uses a Telegram Mini App button (opens an
+    interactive web page). Otherwise, falls back to a plain callback button.
+    """
+    label = f"🎮 {get_text('gw_join_button', lang=lang)} ({participant_count})"
+    web_url = settings.WEB_URL
+    if web_url:
+        url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={giveaway_id}"
+        button = InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+    else:
+        button = InlineKeyboardButton(label, callback_data=f"join_gw_{giveaway_id}")
+    return InlineKeyboardMarkup([[button]])
 
 
 # ─── Create Giveaway ──────────────────────────────────────────────────────────
@@ -176,12 +193,7 @@ async def giveaway_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     )
     desc_text = f"\n📝 {giveaway.description}" if giveaway.description else ""
 
-    join_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            get_text("gw_join_button", lang=lang),
-            callback_data=f"join_gw_{giveaway.id}"
-        )]
-    ])
+    join_keyboard = _join_button(giveaway.id, 0, lang)
 
     announcement = get_text(
         "gw_announcement", lang=lang,
@@ -312,12 +324,7 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
     )
     desc_text = f"\n📝 {giveaway.description}" if giveaway.description else ""
 
-    join_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(
-            get_text("gw_join_button", lang=lang),
-            callback_data=f"join_gw_{giveaway.id}"
-        )]
-    ])
+    join_keyboard = _join_button(giveaway.id, participant_count, lang)
 
     announcement = get_text(
         "gw_announcement", lang=lang,

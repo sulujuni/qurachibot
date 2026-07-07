@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Qurachi — Yutuqli O'yin</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        :root {
+            --bg: #e8f5e9;
+            --card-bg: #ffffff;
+            --primary: #7c4dff;
+            --primary-hover: #651fff;
+            --text: #1a1a2e;
+            --text-secondary: #666;
+            --success: #4caf50;
+            --error: #f44336;
+            --border-radius: 20px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: var(--text);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: var(--border-radius);
+            padding: 40px 30px;
+            text-align: center;
+            width: 100%;
+            max-width: 380px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dice-container {
+            margin: 0 auto 24px;
+            width: 100px;
+            height: 100px;
+            position: relative;
+        }
+
+        .dice-img {
+            width: 100px;
+            height: 100px;
+            transition: transform 0.3s ease;
+        }
+
+        .dice-img.spinning {
+            animation: spin 0.6s ease-in-out;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg) scale(1); }
+            50% { transform: rotate(180deg) scale(1.2); }
+            100% { transform: rotate(360deg) scale(1); }
+        }
+
+        .status-icon {
+            font-size: 24px;
+            margin-bottom: 4px;
+        }
+
+        .status-text {
+            font-size: 17px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .status-sub {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.4;
+        }
+
+        .prize-box {
+            background: linear-gradient(135deg, #fff3e0, #fff8e1);
+            border-radius: 12px;
+            padding: 14px 18px;
+            margin-bottom: 20px;
+            border: 1px solid #ffe0b2;
+        }
+
+        .prize-box .label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #e65100;
+            margin-bottom: 4px;
+        }
+
+        .prize-box .value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #bf360c;
+        }
+
+        .participants-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #f3e5f5;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6a1b9a;
+            margin-bottom: 24px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 14px;
+            font-size: 17px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover { background: var(--primary-hover); transform: translateY(-1px); }
+        .btn-primary:active { transform: translateY(0); }
+
+        .btn-close {
+            background: var(--primary);
+            color: white;
+            margin-top: 12px;
+        }
+
+        .btn-disabled {
+            background: #e0e0e0;
+            color: #999;
+            cursor: not-allowed;
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .timer {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 12px;
+        }
+
+        .timer b { color: var(--text); }
+
+        .channels-list {
+            text-align: left;
+            margin: 16px 0;
+        }
+
+        .channels-list a {
+            display: block;
+            padding: 10px 14px;
+            margin-bottom: 8px;
+            background: #e3f2fd;
+            border-radius: 10px;
+            color: #1565c0;
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        .channels-list a:hover { background: #bbdefb; }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 40px;
+        }
+
+        .loading-dot {
+            width: 10px;
+            height: 10px;
+            background: var(--primary);
+            border-radius: 50%;
+            animation: bounce 1.2s infinite;
+        }
+
+        .loading-dot:nth-child(2) { animation-delay: 0.2s; }
+        .loading-dot:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <!-- Loading state -->
+    <div class="card" id="loadingCard">
+        <div class="loading">
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+        </div>
+    </div>
+
+    <!-- Main card (hidden until loaded) -->
+    <div class="card hidden" id="mainCard">
+        <div class="dice-container">
+            <svg class="dice-img" id="diceIcon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="5" y="5" width="90" height="90" rx="16" fill="#f5f5f5" stroke="#ddd" stroke-width="2"/>
+                <circle cx="30" cy="30" r="7" fill="#333"/>
+                <circle cx="70" cy="30" r="7" fill="#333"/>
+                <circle cx="50" cy="50" r="7" fill="#333"/>
+                <circle cx="30" cy="70" r="7" fill="#333"/>
+                <circle cx="70" cy="70" r="7" fill="#333"/>
+            </svg>
+        </div>
+
+        <div id="statusIcon" class="status-icon"></div>
+        <div id="statusText" class="status-text"></div>
+        <div id="statusSub" class="status-sub"></div>
+
+        <div class="prize-box" id="prizeBox">
+            <div class="label">Sovg'a / Prize</div>
+            <div class="value" id="prizeText"></div>
+        </div>
+
+        <div class="participants-badge" id="participantsBadge">
+            <span>👤</span>
+            <span id="participantsCount">0</span>
+            <span>ishtirokchi</span>
+        </div>
+
+        <!-- Subscribe prompt (hidden by default) -->
+        <div class="channels-list hidden" id="channelsList"></div>
+
+        <div id="timerDiv" class="timer hidden"></div>
+
+        <!-- Action buttons -->
+        <button class="btn btn-primary hidden" id="btnJoin" onclick="joinGiveaway()">
+            QATNASHISH
+        </button>
+        <button class="btn btn-success hidden" id="btnJoined" disabled>
+            ✅ QATNASHYAPSIZ
+        </button>
+        <button class="btn btn-disabled hidden" id="btnEnded">
+            O'YIN TUGAGAN
+        </button>
+        <button class="btn btn-close" id="btnClose" onclick="closeApp()">
+            YOPISH
+        </button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Apply Telegram theme
+        document.body.style.background = tg.themeParams.secondary_bg_color || '#e8f5e9';
+
+        const params = new URLSearchParams(window.location.search);
+        const giveawayId = params.get('id');
+        const BASE_URL = window.location.origin;
+
+        let giveawayData = null;
+
+        async function apiCall(endpoint, method = 'GET', body = null) {
+            const opts = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-Init-Data': tg.initData,
+                },
+            };
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(`${BASE_URL}/miniapp/api${endpoint}`, opts);
+            return res.json();
+        }
+
+        async function loadGiveaway() {
+            try {
+                const data = await apiCall(`/giveaway/${giveawayId}`);
+                giveawayData = data;
+                renderState(data);
+            } catch (e) {
+                showError('Xatolik yuz berdi. Qaytadan urining.');
+            }
+        }
+
+        function renderState(data) {
+            document.getElementById('loadingCard').classList.add('hidden');
+            document.getElementById('mainCard').classList.remove('hidden');
+
+            // Prize
+            document.getElementById('prizeText').textContent = data.prize || 'N/A';
+
+            // Participants
+            document.getElementById('participantsCount').textContent = data.participants || 0;
+
+            // Timer
+            if (data.ends_at && data.status === 'active') {
+                showTimer(data.ends_at);
+            }
+
+            // Status-based rendering
+            if (data.status === 'completed' || data.status === 'cancelled') {
+                showEnded(data);
+            } else if (data.must_subscribe && data.must_subscribe.length > 0) {
+                showSubscribePrompt(data.must_subscribe);
+            } else if (data.already_joined) {
+                showJoined();
+            } else {
+                showJoinable(data);
+            }
+        }
+
+        function showJoinable(data) {
+            document.getElementById('statusIcon').textContent = '🎲';
+            document.getElementById('statusText').textContent = data.title;
+            document.getElementById('statusSub').textContent = `G'oliblar soni: ${data.winner_count}. Qatnashing va omadingizni sinab ko'ring!`;
+            document.getElementById('btnJoin').classList.remove('hidden');
+        }
+
+        function showJoined() {
+            document.getElementById('statusIcon').textContent = '✅';
+            document.getElementById('statusText').textContent = 'Siz qatnashyapsiz!';
+            document.getElementById('statusSub').textContent = `Omad tilaymiz! G'olib tasodifiy aniqlanadi.`;
+            document.getElementById('btnJoined').classList.remove('hidden');
+            document.getElementById('diceIcon').classList.add('spinning');
+        }
+
+        function showEnded(data) {
+            document.getElementById('statusIcon').textContent = '❌';
+            document.getElementById('statusText').textContent = data.status === 'cancelled'
+                ? "O'yin bekor qilingan!"
+                : "O'yin tugagan!";
+            document.getElementById('statusSub').textContent = data.winners_text || '';
+            document.getElementById('btnEnded').classList.remove('hidden');
+            document.getElementById('prizeBox').style.opacity = '0.6';
+        }
+
+        function showSubscribePrompt(channels) {
+            document.getElementById('statusIcon').textContent = '📢';
+            document.getElementById('statusText').textContent = 'Avval obuna bo\'ling';
+            document.getElementById('statusSub').textContent = 'Qatnashish uchun quyidagi kanal(lar)ga obuna bo\'ling:';
+
+            const list = document.getElementById('channelsList');
+            list.innerHTML = '';
+            channels.forEach(ch => {
+                const a = document.createElement('a');
+                a.href = `https://t.me/${ch.replace('@', '')}`;
+                a.target = '_blank';
+                a.textContent = `📢 ${ch}`;
+                list.appendChild(a);
+            });
+            list.classList.remove('hidden');
+
+            const btn = document.getElementById('btnJoin');
+            btn.textContent = 'TEKSHIRISH';
+            btn.classList.remove('hidden');
+            btn.onclick = () => { loadGiveaway(); };
+        }
+
+        function showError(msg) {
+            document.getElementById('loadingCard').classList.add('hidden');
+            document.getElementById('mainCard').classList.remove('hidden');
+            document.getElementById('statusIcon').textContent = '⚠️';
+            document.getElementById('statusText').textContent = msg;
+        }
+
+        function showTimer(endsAt) {
+            const timerDiv = document.getElementById('timerDiv');
+            timerDiv.classList.remove('hidden');
+
+            function update() {
+                const now = new Date().getTime();
+                const end = new Date(endsAt).getTime();
+                const diff = end - now;
+                if (diff <= 0) {
+                    timerDiv.innerHTML = '<b>Vaqt tugadi!</b>';
+                    return;
+                }
+                const h = Math.floor(diff / 3600000);
+                const m = Math.floor((diff % 3600000) / 60000);
+                const s = Math.floor((diff % 60000) / 1000);
+                timerDiv.innerHTML = `Tugashiga: <b>${h}s ${m}d ${s}s</b>`;
+                setTimeout(update, 1000);
+            }
+            update();
+        }
+
+        async function joinGiveaway() {
+            const btn = document.getElementById('btnJoin');
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const data = await apiCall(`/giveaway/${giveawayId}/join`, 'POST');
+
+                if (data.error) {
+                    if (data.must_subscribe) {
+                        showSubscribePrompt(data.must_subscribe);
+                    } else {
+                        showError(data.error);
+                    }
+                    btn.disabled = false;
+                    btn.textContent = 'QATNASHISH';
+                    return;
+                }
+
+                // Success!
+                document.getElementById('diceIcon').classList.add('spinning');
+                document.getElementById('participantsCount').textContent = data.participants || (parseInt(document.getElementById('participantsCount').textContent) + 1);
+                btn.classList.add('hidden');
+                showJoined();
+
+                // Haptic feedback
+                if (tg.HapticFeedback) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = 'QATNASHISH';
+                showError('Xatolik yuz berdi');
+            }
+        }
+
+        function closeApp() {
+            tg.close();
+        }
+
+        // Initialize
+        if (giveawayId) {
+            loadGiveaway();
+        } else {
+            showError("O'yin ID topilmadi");
+        }
+    </script>
+</body>
+</html>
