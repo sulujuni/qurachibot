@@ -923,10 +923,8 @@ async def miniapp_join_filters(x_telegram_init_data: str | None = Header(None)):
 
 @router.post("/join-filter/set")
 async def miniapp_set_join_filter(request: Request, x_telegram_init_data: str | None = Header(None)):
-    """Set join filter for a chat (admin only)."""
+    """Set join filter for a chat. Any user can configure filters for channels they admin."""
     user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
 
     body = await request.json()
     chat_id = body.get("chat_id")

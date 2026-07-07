@@ -1031,8 +1031,8 @@ async function renderProfile() {
         </div>
     </div>`;
 
-    // Join filters (admin only) — with MANAGEMENT UI
-    if (isAdmin) {
+    // Join filters — available to ALL users (any channel admin can configure)
+    {
         let filters = [];
         try { filters = await api('/join-filters'); } catch(e) {}
         html += `<div class="card">
