@@ -15,6 +15,7 @@ from bot.handlers.contest import get_contest_handlers
 from bot.handlers.giveaway import get_giveaway_handlers
 from bot.handlers.group_giveaway import get_group_giveaway_handlers, _load_active_giveaways
 from bot.handlers.join_request import get_join_request_handlers
+from bot.handlers.comment_randomizer import get_comment_randomizer_handlers
 from bot.handlers.loyalty_handler import get_loyalty_handlers
 from bot.handlers.referral_handler import get_referral_handlers
 from bot.jobs import (
@@ -182,6 +183,8 @@ def main() -> None:
     for handler in get_referral_handlers():
         application.add_handler(handler)
     for handler in get_join_request_handlers():
+        application.add_handler(handler)
+    for handler in get_comment_randomizer_handlers():
         application.add_handler(handler)
     for handler in get_alert_handlers():
         application.add_handler(handler)
