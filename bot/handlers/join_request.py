@@ -295,19 +295,50 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """
     user_id = update.effective_user.id
     chat = update.effective_chat
+    target_chat_id = chat.id  # default: current chat
 
-    # Must be used in a group/channel or by admin in private
+    # In private chat: user must provide @channel as last arg
     if chat.type == "private":
-        # Check if admin
-        from bot.handlers.admin import is_admin as check_admin
-        if not check_admin(user_id):
-            await update.message.reply_text(
-                "Bu buyruqni guruh/kanalda ishlating (bot admin bo'lishi kerak)."
-            )
-            return
+        # Try to find @channel in args: /joinfilter all @channel
+        channel_arg = None
+        if context.args:
+            # Check if any arg starts with @
+            for arg in context.args:
+                if arg.startswith("@"):
+                    channel_arg = arg
+                    break
+
+        if channel_arg:
+            # Resolve @channel to chat_id
+            try:
+                target_chat = await context.bot.get_chat(channel_arg)
+                target_chat_id = target_chat.id
+                # Verify the user is admin of that chat
+                member = await context.bot.get_chat_member(target_chat_id, user_id)
+                if member.status not in ("creator", "administrator"):
+                    await update.message.reply_text("⛔ Siz bu kanalda admin emassiz.")
+                    return
+            except Exception as e:
+                await update.message.reply_text(
+                    f"❌ Kanal topilmadi yoki bot admin emas: {channel_arg}\n\n"
+                    "Avval botni kanalga admin sifatida qo'shing.",
+                )
+                return
+        elif not context.args:
+            # No args in private → show help (handled below)
+            pass
+        else:
+            # Args given but no @channel → show usage
+            if not any(a.startswith("@") for a in context.args):
+                await update.message.reply_text(
+                    "💡 Shaxsiy chatda ishlash uchun kanal nomini qo'shing:\n\n"
+                    "<code>/joinfilter all @kanalingiz</code>",
+                    parse_mode="HTML",
+                )
+                return
 
     # In a group/channel — check if user is an admin of that chat
-    if chat.type in ("group", "supergroup", "channel"):
+    elif chat.type in ("group", "supergroup", "channel"):
         try:
             member = await context.bot.get_chat_member(chat.id, user_id)
             if member.status not in ("creator", "administrator"):
@@ -320,7 +351,7 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         # Show current config
         async with async_session() as session:
             result = await session.execute(
-                select(JoinFilter).where(JoinFilter.chat_id == chat.id)
+                select(JoinFilter).where(JoinFilter.chat_id == target_chat_id)
             )
             config = result.scalar_one_or_none()
 
@@ -379,20 +410,27 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # Save config
     async with async_session() as session:
         result = await session.execute(
-            select(JoinFilter).where(JoinFilter.chat_id == chat.id)
+            select(JoinFilter).where(JoinFilter.chat_id == target_chat_id)
         )
         config = result.scalar_one_or_none()
 
         if config:
             config.filter_mode = mode
             config.enabled = (mode != "off")
-            config.chat_title = chat.title
+            config.chat_title = chat.title if chat.type != "private" else config.chat_title
             if channels_str:
                 config.required_channels = channels_str
         else:
+            # Get channel title
+            title = None
+            try:
+                target_chat_info = await context.bot.get_chat(target_chat_id)
+                title = target_chat_info.title
+            except Exception:
+                title = str(target_chat_id)
             config = JoinFilter(
-                chat_id=chat.id,
-                chat_title=chat.title,
+                chat_id=target_chat_id,
+                chat_title=title,
                 filter_mode=mode,
                 enabled=(mode != "off"),
                 required_channels=channels_str,
