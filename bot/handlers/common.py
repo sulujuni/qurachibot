@@ -420,9 +420,20 @@ async def jf_channel_howto_callback(update: Update, context: ContextTypes.DEFAUL
         ),
     }
 
+    # Keep the "✅ Qo'shdim" button available after showing instructions
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "✅ Qo'shdim, davom etish" if lang == "uz"
+            else "✅ Добавил, продолжить" if lang == "ru"
+            else "✅ Added, continue",
+            callback_data="jf_setup_start"
+        )],
+    ])
+
     await query.edit_message_text(
         texts.get(lang, texts["uz"]),
         parse_mode="HTML",
+        reply_markup=keyboard,
     )
 
 
@@ -744,10 +755,7 @@ def get_common_handlers() -> list:
 def get_captcha_answer_handler():
     """Return the CAPTCHA answer handler separately — must be added in a LATER group.
     
-    Catches TEXT messages (for captcha answers) AND forwarded messages
-    (for join filter channel identification via forward).
+    Catches ALL messages (text, forwarded, photos, etc.) in group 1.
+    Only processes if captcha or join filter is awaiting input.
     """
-    return MessageHandler(
-        (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
-        handle_captcha_answer
-    )
+    return MessageHandler(filters.ALL & ~filters.COMMAND, handle_captcha_answer)
