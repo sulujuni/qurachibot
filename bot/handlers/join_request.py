@@ -214,6 +214,116 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 except Exception:
                     pass  # User may not have started bot yet → can't DM
 
+    elif mode == "verified":
+        # Combined anti-fake check: must have profile photo + username + not bot
+        if user.is_bot:
+            accepted = False
+            reason = "Bot account"
+        else:
+            # Check profile photos
+            has_photo = False
+            try:
+                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
+                has_photo = photos.total_count > 0
+            except Exception:
+                has_photo = True  # fail-open on API error
+
+            has_username = bool(user.username)
+            name_ok = bool(user.first_name) and len(user.first_name.strip()) > 1
+
+            if has_photo and has_username and name_ok:
+                accepted = True
+            else:
+                accepted = False
+                reasons = []
+                if not has_photo:
+                    reasons.append("no profile photo")
+                if not has_username:
+                    reasons.append("no username")
+                if not name_ok:
+                    reasons.append("invalid name")
+                reason = "Failed verification: " + ", ".join(reasons)
+
+    elif mode == "photo_required":
+        # Must have at least one profile photo (simplest anti-fake)
+        if user.is_bot:
+            accepted = False
+            reason = "Bot"
+        else:
+            try:
+                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
+                if photos.total_count > 0:
+                    accepted = True
+                else:
+                    accepted = False
+                    reason = "No profile photo"
+            except Exception:
+                accepted = True  # fail-open
+
+    elif mode == "premium":
+        # Only Telegram Premium users (strongest anti-fake — they paid real money)
+        if user.is_bot:
+            accepted = False
+            reason = "Bot"
+        else:
+            is_premium = getattr(user, "is_premium", False)
+            if is_premium:
+                accepted = True
+            else:
+                accepted = False
+                reason = "Premium subscription required"
+
+    elif mode == "strict":
+        # Strictest: must have photo + username + started bot + not bot
+        if user.is_bot:
+            accepted = False
+            reason = "Bot"
+        else:
+            # Check profile photo
+            has_photo = False
+            try:
+                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
+                has_photo = photos.total_count > 0
+            except Exception:
+                has_photo = True
+
+            has_username = bool(user.username)
+
+            # Check if started bot
+            has_started = False
+            async with async_session() as session:
+                result = await session.execute(
+                    select(UserSettings).where(UserSettings.user_id == user.id)
+                )
+                has_started = result.scalar_one_or_none() is not None
+
+            if has_photo and has_username and has_started:
+                accepted = True
+            else:
+                accepted = False
+                reasons = []
+                if not has_photo:
+                    reasons.append("no photo")
+                if not has_username:
+                    reasons.append("no username")
+                if not has_started:
+                    reasons.append("bot not started")
+                reason = "Strict check failed: " + ", ".join(reasons)
+
+                # DM to start bot if that's the missing piece
+                if not has_started:
+                    try:
+                        bot_username = context.bot.username
+                        await context.bot.send_message(
+                            user.id,
+                            f"👋 Qo'shilish uchun:\n"
+                            f"1. Botni ishga tushiring: https://t.me/{bot_username}?start=join_{chat_id}\n"
+                            f"2. Profil rasmingiz bo'lishi kerak\n"
+                            f"3. @username o'rnatilgan bo'lishi kerak",
+                        )
+                    except Exception:
+                        pass
+
     else:
         # Unknown mode → skip
         return
@@ -251,17 +361,22 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Configure join request filter. Command: /joinfilter <mode> [channels]
 
     Modes:
-      all        — Accept everyone
-      no_bots    — Reject bots, accept all humans
-      females    — Only accept female names
-      males      — Only accept male names
-      subscribed — Must be subscribed to channels (provide channels after mode)
-      started    — Must have started the bot
-      off        — Disable filtering (manual review)
+      all            — Accept everyone
+      no_bots        — Reject bots, accept all humans
+      females        — Only accept female names
+      males          — Only accept male names
+      subscribed     — Must be subscribed to channels (provide channels after mode)
+      started        — Must have started the bot
+      verified       — Must have profile photo + username + real name
+      photo_required — Must have at least one profile photo
+      premium        — Only Telegram Premium users
+      strict         — Must have photo + username + started bot (strictest)
+      off            — Disable filtering (manual review)
 
     Examples:
       /joinfilter all
-      /joinfilter females
+      /joinfilter verified
+      /joinfilter strict
       /joinfilter subscribed @channel1, @channel2
       /joinfilter off
     """
@@ -306,6 +421,10 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "<code>/joinfilter males</code> — faqat erkaklar\n"
                 "<code>/joinfilter subscribed @ch1,@ch2</code> — obuna bo'lganlar\n"
                 "<code>/joinfilter started</code> — botni ishga tushirganlar\n"
+                "<code>/joinfilter verified</code> — 🛡 tasdiqlangan (rasm + username + ism)\n"
+                "<code>/joinfilter photo_required</code> — 📷 profil rasmi bor\n"
+                "<code>/joinfilter premium</code> — ⭐ faqat Premium\n"
+                "<code>/joinfilter strict</code> — 🔒 qattiq (rasm + username + bot boshlagan)\n"
                 "<code>/joinfilter off</code> — o'chirish",
                 parse_mode="HTML",
             )
@@ -325,7 +444,7 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     mode = context.args[0].lower()
-    valid_modes = ("all", "no_bots", "females", "males", "subscribed", "started", "off")
+    valid_modes = ("all", "no_bots", "females", "males", "subscribed", "started", "verified", "photo_required", "premium", "strict", "off")
 
     if mode not in valid_modes:
         await update.message.reply_text(
@@ -373,6 +492,10 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "males": "👨 Faqat erkaklar",
         "subscribed": f"📢 Obuna bo'lganlar ({channels_str or 'kanallar kerak'})",
         "started": "🤖 Botni ishga tushirganlar",
+        "verified": "🛡 Tasdiqlangan (rasm + username + ism)",
+        "photo_required": "📷 Profil rasmi bor",
+        "premium": "⭐ Faqat Premium foydalanuvchilar",
+        "strict": "🔒 Qattiq tekshiruv (rasm + username + bot ishga tushirilgan)",
         "off": "❌ O'chirilgan (qo'lda ko'rib chiqish)",
     }
 
