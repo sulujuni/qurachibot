@@ -270,8 +270,11 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "barcha <b>qo'shilish so'rovlarini avtomatik qabul qilish</b> mumkin.\n\n"
             "📌 <b>Qanday sozlash:</b>\n"
             "1. Pastdagi tugma orqali botni kanalga admin qiling\n"
-            "2. Keyin kanalingiz @username sini yuboring\n"
-            "3. Bot avtomatik sozlaydi!\n\n"
+            "2. \"✅ Qo'shdim\" tugmasini bosing\n"
+            "3. Kanaldan istalgan <b>bitta xabarni forward</b> qiling\n"
+            "4. Bot avtomatik sozlaydi!\n\n"
+            "💡 <i>Yopiq kanallar uchun forward usuli ishlaydi — @username kerak emas.\n"
+            "Kanal ID sini bilish uchun: kanaldan xabarni @userinfobot ga forward qiling.</i>\n\n"
             "👇 <b>Avval botni kanalga qo'shing:</b>"
         ),
         "ru": (
@@ -279,20 +282,26 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "Эта функция автоматически принимает все <b>заявки на вступление</b> "
             "в ваш закрытый канал или группу.\n\n"
             "📌 <b>Как настроить:</b>\n"
-            "1. Добавьте бота в канал как админа (кнопка ниже)\n"
-            "2. Потом отправьте @username вашего канала\n"
-            "3. Бот настроит автоматически!\n\n"
-            "👇 <b>Сначала добавьте бота в канал:</b>"
+            "1. Добавьте бота как админа (кнопка ниже)\n"
+            "2. Нажмите \"✅ Добавил\"\n"
+            "3. <b>Перешлите</b> любое сообщение из канала сюда\n"
+            "4. Бот настроит автоматически!\n\n"
+            "💡 <i>Для закрытых каналов — перешлите сообщение (без @username).\n"
+            "Узнать ID канала: перешлите сообщение из канала боту @userinfobot</i>\n\n"
+            "👇 <b>Сначала добавьте бота:</b>"
         ),
         "en": (
             "🚪 <b>Manage Join Requests</b>\n\n"
             "This feature automatically accepts all <b>join requests</b> "
             "to your private channel or group.\n\n"
             "📌 <b>How to set up:</b>\n"
-            "1. Add the bot to your channel as admin (button below)\n"
-            "2. Then send your channel's @username\n"
-            "3. Bot will configure automatically!\n\n"
-            "👇 <b>First, add the bot to your channel:</b>"
+            "1. Add the bot as admin (button below)\n"
+            "2. Tap \"✅ Added\"\n"
+            "3. <b>Forward</b> any message from your channel here\n"
+            "4. Bot will configure automatically!\n\n"
+            "💡 <i>Works for private channels — no @username needed.\n"
+            "To find channel ID: forward a message to @userinfobot</i>\n\n"
+            "👇 <b>First, add the bot:</b>"
         ),
     }
 
