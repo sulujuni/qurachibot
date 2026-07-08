@@ -2,8 +2,8 @@
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, Update
+from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from bot.i18n import SUPPORTED_LANGUAGES, get_text
 from bot.config import settings
@@ -13,8 +13,6 @@ from bot.handlers.captcha_handler import is_user_verified
 
 # ─── Reply Keyboard Menu (persistent buttons at the bottom) ──────────────────
 
-from telegram import ReplyKeyboardMarkup, KeyboardButton
-
 
 def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
     """Build the main menu reply keyboard based on language."""
@@ -22,17 +20,20 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
         "uz": [
             ["🎲 Yutuqli o'yin yaratish", "📋 Mening o'yinlarim"],
             ["🏅 Konkurs yaratish", "🏆 Reyting"],
-            ["👥 Do'st taklif qilish", "⚙️ Sozlamalar"],
+            ["👥 Do'st taklif qilish", "🚪 Join filter"],
+            ["⚙️ Sozlamalar"],
         ],
         "ru": [
             ["🎲 Создать розыгрыш", "📋 Мои розыгрыши"],
             ["🏅 Создать конкурс", "🏆 Рейтинг"],
-            ["👥 Пригласить друга", "⚙️ Настройки"],
+            ["👥 Пригласить друга", "🚪 Join filter"],
+            ["⚙️ Настройки"],
         ],
         "en": [
             ["🎲 Create Giveaway", "📋 My Giveaways"],
             ["🏅 Create Contest", "🏆 Leaderboard"],
-            ["👥 Invite Friends", "⚙️ Settings"],
+            ["👥 Invite Friends", "🚪 Join Filter"],
+            ["⚙️ Settings"],
         ],
     }
     buttons = menus.get(lang, menus["uz"])
@@ -260,6 +261,12 @@ async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await lang_command(update, context)
 
 
+async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🚪 Join Filter' button tap."""
+    from bot.handlers.join_request import joinfilter_command
+    await joinfilter_command(update, context)
+
+
 def get_common_handlers() -> list:
     """Return common command handlers."""
     return [
@@ -276,5 +283,6 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
         MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
+        MessageHandler(filters.Regex(r"^(🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
         MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
     ]
