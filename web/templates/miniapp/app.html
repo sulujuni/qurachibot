@@ -197,6 +197,10 @@ const T = {
         no_active_gw: "Hozircha faol o'yinlar yo'q", no_active_ct: "Hozircha faol konkurslar yo'q",
         active: 'Faol', ended: 'Tugagan', won: 'Yutdim', accepting: 'Qabul qilmoqda', voting: 'Ovoz berish',
         no_limit: 'Chegarasiz', left: 'qoldi',
+        join_btn: 'Qatnashish', joined_btn: "✅ Qatnashyapsiz", join_success: "🎉 Muvaffaqiyatli qo'shildingiz!",
+        gw_prize: "Sovg'a", gw_winners: "G'oliblar", gw_participants: "Ishtirokchilar", gw_ends: "Tugaydi",
+        gw_join_prompt: "O'yinga qatnashish uchun quyidagi tugmani bosing:",
+        gw_ended: "Bu o'yin tugagan", gw_subscribe_first: "Avval kanallarga obuna bo'ling:",
         participated_games: "Qatnashgan o'yinlarim", created_games: "Yaratgan o'yinlarim",
         no_participated: "Siz hali biror o'yinda qatnashmagansiz", no_created: "Siz hali o'yin yaratmagansiz",
         referral_title: "Do'st taklif qilish (Referal)", referral_desc: "Havolani ulashing — har bir taklif uchun",
@@ -272,6 +276,10 @@ const T = {
         no_active_gw: 'Активных розыгрышей пока нет', no_active_ct: 'Активных конкурсов пока нет',
         active: 'Активен', ended: 'Завершён', won: 'Выиграл', accepting: 'Приём', voting: 'Голосование',
         no_limit: 'Без ограничения', left: 'осталось',
+        join_btn: 'Участвовать', joined_btn: '✅ Вы участвуете', join_success: '🎉 Вы успешно присоединились!',
+        gw_prize: 'Приз', gw_winners: 'Победители', gw_participants: 'Участники', gw_ends: 'Заканчивается',
+        gw_join_prompt: 'Нажмите кнопку ниже, чтобы участвовать:',
+        gw_ended: 'Этот розыгрыш завершён', gw_subscribe_first: 'Сначала подпишитесь на каналы:',
         participated_games: 'Мои участия', created_games: 'Мои розыгрыши',
         no_participated: 'Вы ещё не участвовали', no_created: 'Вы ещё не создавали',
         referral_title: 'Пригласить друга (Реферал)', referral_desc: 'Поделитесь ссылкой — за каждого друга',
@@ -346,6 +354,10 @@ const T = {
         no_active_gw: 'No active giveaways yet', no_active_ct: 'No active contests yet',
         active: 'Active', ended: 'Ended', won: 'Won', accepting: 'Accepting', voting: 'Voting',
         no_limit: 'No limit', left: 'left',
+        join_btn: 'Join', joined_btn: '✅ Joined', join_success: '🎉 Successfully joined!',
+        gw_prize: 'Prize', gw_winners: 'Winners', gw_participants: 'Participants', gw_ends: 'Ends',
+        gw_join_prompt: 'Tap the button below to participate:',
+        gw_ended: 'This giveaway has ended', gw_subscribe_first: 'Subscribe to these channels first:',
         participated_games: 'Games I joined', created_games: 'Games I created',
         no_participated: "You haven't joined any games yet", no_created: "You haven't created any yet",
         referral_title: 'Invite Friends (Referral)', referral_desc: 'Share this link — earn for each invite',
@@ -541,13 +553,16 @@ async function renderHome() {
         html += `<div class="empty-state"><div class="emoji">🎲</div><p>${t('no_active_gw')}</p></div>`;
     } else {
         games.forEach(g => {
-            html += `<div class="game-item" onclick="openGiveaway(${g.id})">
-                <div class="game-icon">🎁</div>
-                <div class="game-info">
-                    <div class="game-title">${g.title}</div>
-                    <div class="game-meta">🎁 ${g.prize} · 👤 ${g.participants} · ${timeLeft(g.ends_at)}</div>
+            html += `<div class="game-item" style="flex-direction:column;align-items:stretch;" onclick="openGiveaway(${g.id})">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div class="game-icon">🎁</div>
+                    <div class="game-info">
+                        <div class="game-title">${g.title}</div>
+                        <div class="game-meta">🎁 ${g.prize} · 👤 ${g.participants} · ${timeLeft(g.ends_at)}</div>
+                    </div>
+                    <span class="game-badge badge-active">${t('active')}</span>
                 </div>
-                <span class="game-badge badge-active">${t('active')}</span>
+                <button class="btn btn-primary" style="margin-top:8px;padding:10px;font-size:13px;width:100%;" onclick="event.stopPropagation();quickJoinGiveaway(${g.id},this)">🎲 ${t('join_btn')}</button>
             </div>`;
         });
     }
@@ -560,13 +575,16 @@ async function renderHome() {
     } else {
         contests.forEach(c => {
             const statusLabel = c.status === 'accepting_submissions' ? t('accepting') : t('voting');
-            html += `<div class="game-item" onclick="openContest(${c.id})">
-                <div class="game-icon">🏅</div>
-                <div class="game-info">
-                    <div class="game-title">${c.title}</div>
-                    <div class="game-meta">📤 ${c.submissions} · ${c.prize || ''}</div>
+            html += `<div class="game-item" style="flex-direction:column;align-items:stretch;" onclick="openContest(${c.id})">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div class="game-icon">🏅</div>
+                    <div class="game-info">
+                        <div class="game-title">${c.title}</div>
+                        <div class="game-meta">📤 ${c.submissions} · ${c.prize || ''}</div>
+                    </div>
+                    <span class="game-badge badge-active">${statusLabel}</span>
                 </div>
-                <span class="game-badge badge-active">${statusLabel}</span>
+                <button class="btn btn-primary" style="margin-top:8px;padding:10px;font-size:13px;width:100%;" onclick="event.stopPropagation();openContest(${c.id})">🏅 ${t('join_btn')}</button>
             </div>`;
         });
     }
@@ -575,8 +593,95 @@ async function renderHome() {
     el.innerHTML = html;
 }
 
-function openGiveaway(id) {
-    window.location.href = `/miniapp/giveaway?id=${id}`;
+async function quickJoinGiveaway(id, btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳...';
+    const res = await api(`/giveaway/${id}/join`, 'POST');
+    if (res.error) {
+        if (res.already_joined) {
+            btn.textContent = t('joined_btn');
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-secondary');
+        } else {
+            showToast(res.error, 'error');
+            btn.disabled = false;
+            btn.textContent = '🎲 ' + t('join_btn');
+        }
+        return;
+    }
+    btn.textContent = t('joined_btn');
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-secondary');
+    showToast(t('join_success'));
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+}
+
+async function openGiveaway(id) {
+    const el = document.getElementById('content');
+    el.innerHTML = '<div class="empty-state">⏳</div>';
+
+    const data = await api(`/giveaway/${id}`);
+    if (!data.id) { showToast('?', 'error'); switchTab('home'); return; }
+
+    const isEnded = data.status !== 'active';
+    const needsSub = data.must_subscribe && data.must_subscribe.length > 0;
+
+    let html = `
+    <div class="card">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+            <span onclick="switchTab('home')" style="cursor:pointer;font-size:20px;">←</span>
+            <div class="card-title" style="margin-bottom:0;">🎁 ${data.title}</div>
+        </div>
+        ${data.description ? `<p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">${data.description}</p>` : ''}
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${data.participants || 0}</div><div class="stat-lbl">${t('gw_participants')}</div></div>
+            <div class="stat-box"><div class="stat-val">${data.winner_count}</div><div class="stat-lbl">${t('gw_winners')}</div></div>
+        </div>
+        ${data.prize ? `<div style="background:linear-gradient(135deg,#fff3e0,#fff8e1);border-radius:var(--radius-sm);padding:12px;margin:12px 0;border:1px solid #ffe0b2;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#e65100;">${t('gw_prize')}</div>
+            <div style="font-size:16px;font-weight:700;color:#bf360c;">${data.prize}</div>
+        </div>` : ''}
+        ${data.ends_at ? `<div style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">⏰ ${t('gw_ends')}: ${timeLeft(data.ends_at)}</div>` : ''}`;
+
+    if (isEnded) {
+        html += `<div style="text-align:center;padding:16px;background:var(--bg-secondary);border-radius:var(--radius-sm);">
+            <p style="font-size:14px;font-weight:600;">${t('gw_ended')}</p>
+            ${data.winners_text ? `<p style="margin-top:8px;color:var(--text-hint);">${data.winners_text}</p>` : ''}
+        </div>`;
+    } else if (data.already_joined) {
+        html += `<button class="btn btn-secondary" disabled style="padding:14px;font-size:15px;">${t('joined_btn')}</button>`;
+    } else if (needsSub) {
+        html += `<p style="font-size:13px;font-weight:600;margin-bottom:8px;">⚠️ ${t('gw_subscribe_first')}</p>`;
+        data.must_subscribe.forEach(ch => {
+            const link = typeof ch === 'string' && ch.startsWith('@') ? `https://t.me/${ch.slice(1)}` : `https://t.me/c/${String(ch).replace('-100','')}`;
+            html += `<a href="${link}" target="_blank" style="display:block;padding:10px 14px;margin-bottom:6px;background:#e3f2fd;border-radius:10px;color:#1565c0;text-decoration:none;font-weight:500;">📢 ${ch}</a>`;
+        });
+        html += `<button class="btn btn-primary" style="margin-top:12px;padding:14px;font-size:15px;" onclick="joinGiveawayDetail(${data.id})">🎲 ${t('join_btn')}</button>`;
+    } else {
+        html += `<p style="font-size:13px;color:var(--text-hint);margin-bottom:10px;">${t('gw_join_prompt')}</p>
+            <button class="btn btn-primary" style="padding:14px;font-size:15px;" id="gwJoinBtn" onclick="joinGiveawayDetail(${data.id})">🎲 ${t('join_btn')}</button>`;
+    }
+
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+async function joinGiveawayDetail(id) {
+    const btn = document.getElementById('gwJoinBtn') || event.target;
+    btn.disabled = true;
+    btn.textContent = '⏳...';
+    const res = await api(`/giveaway/${id}/join`, 'POST');
+    if (res.error) {
+        showToast(res.error, 'error');
+        btn.disabled = false;
+        btn.textContent = '🎲 ' + t('join_btn');
+        return;
+    }
+    btn.textContent = t('joined_btn');
+    btn.classList.remove('btn-primary');
+    btn.classList.add('btn-secondary');
+    showToast(t('join_success'));
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
 }
 </script>
 
