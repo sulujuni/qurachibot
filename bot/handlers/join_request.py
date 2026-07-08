@@ -145,30 +145,55 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             accepted = True
 
     elif mode == "females":
-        # Only accept female names
+        # Only accept female users (by self-reported gender or name heuristic)
         if user.is_bot:
             accepted = False
             reason = "Bot"
         else:
-            gender = _guess_gender(user.first_name)
-            if gender == "female":
-                accepted = True
+            # First check if user has self-reported gender in DB
+            async with async_session() as session:
+                result = await session.execute(
+                    select(UserSettings).where(UserSettings.user_id == user.id)
+                )
+                settings = result.scalar_one_or_none()
+
+            if settings and settings.gender:
+                # Use self-reported gender (reliable)
+                accepted = (settings.gender == "female")
+                if not accepted:
+                    reason = "Only female users accepted"
             else:
-                accepted = False
-                reason = "Only female users accepted"
+                # Fallback to name heuristic
+                gender = _guess_gender(user.first_name)
+                if gender == "female":
+                    accepted = True
+                else:
+                    accepted = False
+                    reason = "Only female users accepted (pass /verify to confirm)"
 
     elif mode == "males":
-        # Only accept male names
+        # Only accept male users (by self-reported gender or name heuristic)
         if user.is_bot:
             accepted = False
             reason = "Bot"
         else:
-            gender = _guess_gender(user.first_name)
-            if gender == "male":
-                accepted = True
+            async with async_session() as session:
+                result = await session.execute(
+                    select(UserSettings).where(UserSettings.user_id == user.id)
+                )
+                settings = result.scalar_one_or_none()
+
+            if settings and settings.gender:
+                accepted = (settings.gender == "male")
+                if not accepted:
+                    reason = "Only male users accepted"
             else:
-                accepted = False
-                reason = "Only male users accepted"
+                gender = _guess_gender(user.first_name)
+                if gender == "male":
+                    accepted = True
+                else:
+                    accepted = False
+                    reason = "Only male users accepted (pass /verify to confirm)"
 
     elif mode == "subscribed":
         # Must be subscribed to required channels

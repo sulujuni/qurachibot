@@ -30,8 +30,8 @@ from bot.utils.captcha import generate_captcha, verify_captcha
 
 logger = logging.getLogger(__name__)
 
-# Conversation state
-AWAITING_ANSWER = 0
+# Conversation states
+AWAITING_ANSWER, AWAITING_GENDER = range(2)
 
 
 async def is_user_verified(user_id: int) -> bool:
@@ -44,8 +44,8 @@ async def is_user_verified(user_id: int) -> bool:
     return bool(verified)
 
 
-async def mark_verified(user_id: int) -> None:
-    """Mark a user as CAPTCHA-verified."""
+async def mark_verified(user_id: int, gender: str = None) -> None:
+    """Mark a user as CAPTCHA-verified and optionally store gender."""
     async with async_session() as session:
         result = await session.execute(
             select(UserSettings).where(UserSettings.user_id == user_id)
@@ -53,8 +53,10 @@ async def mark_verified(user_id: int) -> None:
         settings = result.scalar_one_or_none()
         if settings:
             settings.captcha_verified = True
+            if gender:
+                settings.gender = gender
         else:
-            settings = UserSettings(user_id=user_id, language="uz", captcha_verified=True)
+            settings = UserSettings(user_id=user_id, language="uz", captcha_verified=True, gender=gender)
             session.add(settings)
         await session.commit()
 
@@ -98,21 +100,23 @@ async def check_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await send_captcha(update, context)
 
     if verify_captcha(user_answer, correct_answer):
-        # Correct!
-        await mark_verified(user_id)
+        # Correct! Now ask gender
         context.user_data.pop("captcha_answer", None)
         context.user_data.pop("captcha_attempts", None)
 
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👨 Erkak / Male", callback_data="gender_male"),
+                InlineKeyboardButton("👩 Ayol / Female", callback_data="gender_female"),
+            ]
+        ])
         await update.message.reply_text(
-            "✅ <b>Tasdiqlandi!</b>\n\n"
-            "Siz haqiqiy foydalanuvchi ekansiz. Endi barcha funksiyalar sizga ochiq:\n"
-            "• Yutuqli o'yinlarda qatnashish\n"
-            "• Konkurslarda ishtirok etish\n"
-            "• Kanallarga qo'shilish\n\n"
-            "Davom etish uchun /help ni bosing.",
+            "✅ <b>To'g'ri!</b>\n\n"
+            "Oxirgi savol — jinsingizni tanlang:",
+            reply_markup=keyboard,
             parse_mode="HTML",
         )
-        return ConversationHandler.END
+        return AWAITING_GENDER
     else:
         # Wrong answer
         attempts += 1
@@ -146,6 +150,28 @@ async def cancel_captcha(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         "⚠️ Tekshiruv bekor qilindi.\n"
         "O'yinlarda qatnashish uchun /verify buyrug'i bilan tasdiqlaning.",
+    )
+    return ConversationHandler.END
+
+
+async def gender_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle gender selection after CAPTCHA."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    gender = query.data.split("_")[1]  # "male" or "female"
+    await mark_verified(user_id, gender=gender)
+
+    gender_emoji = "👨" if gender == "male" else "👩"
+    await query.edit_message_text(
+        f"✅ <b>Tasdiqlandi!</b> {gender_emoji}\n\n"
+        "Siz haqiqiy foydalanuvchi ekansiz. Endi barcha funksiyalar sizga ochiq:\n"
+        "• Yutuqli o'yinlarda qatnashish\n"
+        "• Konkurslarda ishtirok etish\n"
+        "• Kanallarga qo'shilish\n\n"
+        "Davom etish uchun /help ni bosing.",
+        parse_mode="HTML",
     )
     return ConversationHandler.END
 
@@ -195,6 +221,9 @@ def get_captcha_handlers() -> list:
         states={
             AWAITING_ANSWER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, check_answer),
+            ],
+            AWAITING_GENDER: [
+                CallbackQueryHandler(gender_selected, pattern=r"^gender_(male|female)$"),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_captcha)],
