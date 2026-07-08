@@ -1174,9 +1174,9 @@ async function renderProfile() {
             <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
                 <b style="font-size:13px;">➕ ${t('add_filter')}</b>
                 <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin:10px 0;font-size:12px;">
-                    ${currentLang === 'uz' ? '💡 <b>Oson usul:</b> Botga qaytib, "🚪 So\'rovlarni boshqarish" tugmasini bosing va kanaldan xabar forward qiling. Yoki quyida kanal ID sini kiriting:' :
-                     currentLang === 'ru' ? '💡 <b>Проще:</b> Вернитесь в бот, нажмите "🚪 Управление заявками" и перешлите сообщение из канала. Или введите ID канала ниже:' :
-                     '💡 <b>Easier way:</b> Go back to the bot, tap "🚪 Join Requests" and forward a message from your channel. Or enter channel ID below:'}
+                    ${currentLang === 'uz' ? '💡 <b>Oson usul:</b> Botga qaytib, "🚪 So\'rovlarni boshqarish" tugmasini bosing va kanaldan xabar forward qiling. Mini App uchun kanal ID sini @userinfobot dan oling.' :
+                     currentLang === 'ru' ? '💡 <b>Проще:</b> Вернитесь в бот, нажмите "🚪 Управление заявками" и перешлите сообщение из канала. Для Мини Приложения узнайте ID через @userinfobot.' :
+                     '💡 <b>Easier way:</b> Go back to the bot, tap "🚪 Join Requests" and forward a message. For Mini App, get the ID from @userinfobot.'}
                 </div>
                 <div class="form-group">
                     <label class="form-label">${t('channel_input')}</label>

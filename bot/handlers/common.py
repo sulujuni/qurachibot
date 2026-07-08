@@ -273,8 +273,8 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "2. \"✅ Qo'shdim\" tugmasini bosing\n"
             "3. Kanaldan istalgan <b>bitta xabarni forward</b> qiling\n"
             "4. Bot avtomatik sozlaydi!\n\n"
-            "💡 <i>Yopiq kanallar uchun forward usuli ishlaydi — @username kerak emas.\n"
-            "Kanal ID sini bilish uchun: kanaldan xabarni @userinfobot ga forward qiling.</i>\n\n"
+            "💡 <i>Kanal ID sini bilish uchun: kanaldan xabarni @userinfobot ga forward qiling "
+            "yoki shu yerda \"✅ Qo'shdim\" bosib, bizning botga forward qiling.</i>\n\n"
             "👇 <b>Avval botni kanalga qo'shing:</b>"
         ),
         "ru": (
@@ -286,8 +286,8 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "2. Нажмите \"✅ Добавил\"\n"
             "3. <b>Перешлите</b> любое сообщение из канала сюда\n"
             "4. Бот настроит автоматически!\n\n"
-            "💡 <i>Для закрытых каналов — перешлите сообщение (без @username).\n"
-            "Узнать ID канала: перешлите сообщение из канала боту @userinfobot</i>\n\n"
+            "💡 <i>Узнать ID канала: перешлите сообщение из канала боту @userinfobot "
+            "или нажмите \"✅ Добавил\" и перешлите сюда.</i>\n\n"
             "👇 <b>Сначала добавьте бота:</b>"
         ),
         "en": (
@@ -299,8 +299,8 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "2. Tap \"✅ Added\"\n"
             "3. <b>Forward</b> any message from your channel here\n"
             "4. Bot will configure automatically!\n\n"
-            "💡 <i>Works for private channels — no @username needed.\n"
-            "To find channel ID: forward a message to @userinfobot</i>\n\n"
+            "💡 <i>To find channel ID: forward a message to @userinfobot "
+            "or tap \"✅ Added\" and forward it here.</i>\n\n"
             "👇 <b>First, add the bot:</b>"
         ),
     }
