@@ -264,9 +264,13 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle CAPTCHA answer from /start flow (standalone, no ConversationHandler)."""
+    """Handle CAPTCHA answer from /start flow (standalone, no ConversationHandler).
+    
+    IMPORTANT: This handler only processes messages when user_data has 
+    'awaiting_captcha' = True. Otherwise it does NOTHING (passes through).
+    """
     if not context.user_data.get("awaiting_captcha"):
-        return  # Not waiting for captcha — ignore
+        return  # Not waiting for captcha — let other handlers process this
 
     from bot.utils.captcha import generate_captcha, verify_captcha
     from bot.handlers.captcha_handler import mark_verified
@@ -369,6 +373,8 @@ def get_common_handlers() -> list:
         CommandHandler("leaderboard", leaderboard_command),
         CommandHandler("lang", lang_command),
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
+        # Gender callback from /start captcha flow
+        CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
         # Reply keyboard button handlers (all 3 languages)
         MessageHandler(filters.Regex(r"^(🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
         MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
@@ -377,8 +383,9 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
         MessageHandler(filters.Regex(r"^(🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
         MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
-        # Gender callback from /start captcha flow
-        CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
-        # Captcha answer handler (must be last — catches any text when awaiting)
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer),
     ]
+
+
+def get_captcha_answer_handler():
+    """Return the CAPTCHA answer handler separately — must be added in a LATER group."""
+    return MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer)

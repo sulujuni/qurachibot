@@ -10,7 +10,7 @@ from telegram.ext import Application
 from bot.config import settings
 from bot.handlers.admin import get_admin_handlers
 from bot.handlers.alerts import get_alert_handlers
-from bot.handlers.common import get_common_handlers
+from bot.handlers.common import get_common_handlers, get_captcha_answer_handler
 from bot.handlers.contest import get_contest_handlers
 from bot.handlers.giveaway import get_giveaway_handlers
 from bot.handlers.group_giveaway import get_group_giveaway_handlers, _load_active_giveaways
@@ -193,6 +193,10 @@ def main() -> None:
         application.add_handler(handler)
     for handler in get_common_handlers():
         application.add_handler(handler)
+
+    # CAPTCHA answer handler in group 1 (lower priority than all other handlers)
+    # This ensures it only catches messages when no other handler matched
+    application.add_handler(get_captcha_answer_handler(), group=1)
 
     # allowed_updates must include message reactions so REACTION-mode
     # giveaways can capture emoji reactions on posts.
