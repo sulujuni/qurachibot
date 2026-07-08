@@ -9,6 +9,7 @@ from bot.i18n import SUPPORTED_LANGUAGES, get_text
 from bot.config import settings
 from bot.utils.lang import get_user_lang, set_user_lang, t
 from bot.utils.referral import parse_referral_payload, process_referral
+from bot.handlers.captcha_handler import is_user_verified
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ LANG_NAMES = {
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /start command, including referral deep links.
+    """Handle /start command, including referral deep links and CAPTCHA.
 
     Optimized for bursts (e.g. a referral konkurs sending thousands of /start
     at once): the welcome reply is sent immediately, and referral bookkeeping
@@ -38,7 +39,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
     # Recorded with verify_subscription=False → pure DB, no Telegram call here.
     if context.args:
-        referrer_id, giveaway_id = parse_referral_payload(context.args[0])
+        payload = context.args[0]
+        # Handle /start verify (from captcha prompt button)
+        if payload == "verify":
+            from bot.handlers.captcha_handler import send_captcha
+            await send_captcha(update, context)
+            return
+
+        referrer_id, giveaway_id = parse_referral_payload(payload)
         if referrer_id:
             try:
                 await process_referral(
@@ -50,6 +58,23 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 )
             except Exception as e:
                 logger.warning("Referral processing failed for %s: %s", user_id, e)
+
+    # If user is not CAPTCHA-verified, prompt them
+    if not await is_user_verified(user_id):
+        bot_username = context.bot.username
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "🔒 Tekshiruvdan o'tish (CAPTCHA)",
+                url=f"https://t.me/{bot_username}?start=verify"
+            )]
+        ])
+        await update.message.reply_text(
+            "🔒 <b>Qatnashish uchun tekshiruv kerak</b>\n\n"
+            "Botlardan himoyalanish uchun oddiy matematik misolni yeching.\n"
+            "Bu bir marta — keyin barcha funksiyalar ochiq bo'ladi.",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -188,7 +188,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 accepted = True  # No channels configured → accept
 
     elif mode == "started":
-        # Only accept if user has started the bot (exists in user_settings)
+        # Only accept if user has started AND passed CAPTCHA
         if user.is_bot:
             accepted = False
             reason = "Bot"
@@ -197,22 +197,30 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 result = await session.execute(
                     select(UserSettings).where(UserSettings.user_id == user.id)
                 )
-                has_started = result.scalar_one_or_none() is not None
-            if has_started:
+                settings = result.scalar_one_or_none()
+                has_started = settings is not None
+                is_captcha_verified = settings.captcha_verified if settings else False
+
+            if has_started and is_captcha_verified:
                 accepted = True
             else:
                 accepted = False
-                reason = "Must start the bot first"
-                # DM the user to start the bot
+                if not has_started:
+                    reason = "Must start the bot first"
+                else:
+                    reason = "Must pass CAPTCHA verification"
+                # DM the user to start/verify
                 try:
                     bot_username = context.bot.username
                     await context.bot.send_message(
                         user.id,
-                        f"👋 Guruhga qo'shilish uchun avval botni ishga tushiring:\n"
-                        f"https://t.me/{bot_username}?start=join_{chat_id}",
+                        f"👋 Guruhga qo'shilish uchun:\n"
+                        f"1. Botni ishga tushiring: https://t.me/{bot_username}?start=verify\n"
+                        f"2. CAPTCHA tekshiruvidan o'ting\n\n"
+                        f"Keyin qayta so'rov yuboring.",
                     )
                 except Exception:
-                    pass  # User may not have started bot yet → can't DM
+                    pass
 
     elif mode == "verified":
         # Combined anti-fake check: must have profile photo + username + not bot
@@ -274,7 +282,7 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 reason = "Premium subscription required"
 
     elif mode == "strict":
-        # Strictest: must have photo + username + started bot + not bot
+        # Strictest: must have photo + username + passed CAPTCHA
         if user.is_bot:
             accepted = False
             reason = "Bot"
@@ -289,15 +297,16 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 
             has_username = bool(user.username)
 
-            # Check if started bot
-            has_started = False
+            # Check if CAPTCHA-verified
+            is_captcha_verified = False
             async with async_session() as session:
                 result = await session.execute(
                     select(UserSettings).where(UserSettings.user_id == user.id)
                 )
-                has_started = result.scalar_one_or_none() is not None
+                settings = result.scalar_one_or_none()
+                is_captcha_verified = settings.captcha_verified if settings else False
 
-            if has_photo and has_username and has_started:
+            if has_photo and has_username and is_captcha_verified:
                 accepted = True
             else:
                 accepted = False
@@ -306,20 +315,21 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                     reasons.append("no photo")
                 if not has_username:
                     reasons.append("no username")
-                if not has_started:
-                    reasons.append("bot not started")
+                if not is_captcha_verified:
+                    reasons.append("CAPTCHA not passed")
                 reason = "Strict check failed: " + ", ".join(reasons)
 
-                # DM to start bot if that's the missing piece
-                if not has_started:
+                # DM to verify
+                if not is_captcha_verified:
                     try:
                         bot_username = context.bot.username
                         await context.bot.send_message(
                             user.id,
                             f"👋 Qo'shilish uchun:\n"
-                            f"1. Botni ishga tushiring: https://t.me/{bot_username}?start=join_{chat_id}\n"
+                            f"1. CAPTCHA yeching: https://t.me/{bot_username}?start=verify\n"
                             f"2. Profil rasmingiz bo'lishi kerak\n"
-                            f"3. @username o'rnatilgan bo'lishi kerak",
+                            f"3. @username o'rnatilgan bo'lishi kerak\n\n"
+                            f"Keyin qayta so'rov yuboring.",
                         )
                     except Exception:
                         pass

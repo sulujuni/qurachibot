@@ -226,6 +226,13 @@ async def join_giveaway(
         if existing.scalar_one_or_none():
             return {"error": "Siz allaqachon qatnashyapsiz", "already_joined": True}
 
+        # Check CAPTCHA verification
+        from bot.models.user_settings import UserSettings as US
+        us_result = await session.execute(select(US).where(US.user_id == user_id))
+        us = us_result.scalar_one_or_none()
+        if not us or not us.captcha_verified:
+            return {"error": "Avval CAPTCHA tekshiruvidan o'ting (/verify)", "need_captcha": True}
+
         # Check subscription
         required_channels = parse_channels(giveaway.required_channels)
         if required_channels:

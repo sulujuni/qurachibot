@@ -1,6 +1,6 @@
 """User settings model for storing language preferences."""
 
-from sqlalchemy import BigInteger, Integer, String
+from sqlalchemy import BigInteger, Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.models.base import Base
@@ -14,6 +14,7 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     language: Mapped[str] = mapped_column(String(5), default="en", nullable=False)
+    captcha_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     def __repr__(self) -> str:
-        return f"<UserSettings(user_id={self.user_id}, language='{self.language}')>"
+        return f"<UserSettings(user_id={self.user_id}, language='{self.language}', verified={self.captcha_verified})>"
