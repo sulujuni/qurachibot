@@ -132,235 +132,114 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     accepted = False
     reason = ""
 
-    if mode == "all":
-        # Accept everyone
-        accepted = True
-
-    elif mode == "no_bots":
-        # Reject bots, accept humans
-        if user.is_bot:
-            accepted = False
-            reason = "Bot accounts are not allowed"
-        else:
-            accepted = True
-
-    elif mode == "females":
-        # Only accept female users (by self-reported gender or name heuristic)
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            # First check if user has self-reported gender in DB
-            async with async_session() as session:
-                result = await session.execute(
-                    select(UserSettings).where(UserSettings.user_id == user.id)
-                )
-                settings = result.scalar_one_or_none()
-
-            if settings and settings.gender:
-                # Use self-reported gender (reliable)
-                accepted = (settings.gender == "female")
-                if not accepted:
-                    reason = "Only female users accepted"
-            else:
-                # Fallback to name heuristic
-                gender = _guess_gender(user.first_name)
-                if gender == "female":
-                    accepted = True
-                else:
-                    accepted = False
-                    reason = "Only female users accepted (pass /verify to confirm)"
-
-    elif mode == "males":
-        # Only accept male users (by self-reported gender or name heuristic)
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            async with async_session() as session:
-                result = await session.execute(
-                    select(UserSettings).where(UserSettings.user_id == user.id)
-                )
-                settings = result.scalar_one_or_none()
-
-            if settings and settings.gender:
-                accepted = (settings.gender == "male")
-                if not accepted:
-                    reason = "Only male users accepted"
-            else:
-                gender = _guess_gender(user.first_name)
-                if gender == "male":
-                    accepted = True
-                else:
-                    accepted = False
-                    reason = "Only male users accepted (pass /verify to confirm)"
-
-    elif mode == "subscribed":
-        # Must be subscribed to required channels
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            channels = parse_channels(config.required_channels)
-            if channels:
-                missing = await get_unsubscribed(context.bot, user.id, channels)
-                if missing:
-                    accepted = False
-                    reason = f"Must subscribe to: {', '.join(missing)}"
-                else:
-                    accepted = True
-            else:
-                accepted = True  # No channels configured → accept
-
-    elif mode == "started":
-        # Only accept if user has started AND passed CAPTCHA
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            async with async_session() as session:
-                result = await session.execute(
-                    select(UserSettings).where(UserSettings.user_id == user.id)
-                )
-                settings = result.scalar_one_or_none()
-                has_started = settings is not None
-                is_captcha_verified = settings.captcha_verified if settings else False
-
-            if has_started and is_captcha_verified:
-                accepted = True
-            else:
-                accepted = False
-                if not has_started:
-                    reason = "Must start the bot first"
-                else:
-                    reason = "Must pass CAPTCHA verification"
-                # DM the user to start/verify
-                try:
-                    bot_username = context.bot.username
-                    await context.bot.send_message(
-                        user.id,
-                        f"👋 Guruhga qo'shilish uchun:\n"
-                        f"1. Botni ishga tushiring: https://t.me/{bot_username}?start=verify\n"
-                        f"2. CAPTCHA tekshiruvidan o'ting\n\n"
-                        f"Keyin qayta so'rov yuboring.",
-                    )
-                except Exception:
-                    pass
-
-    elif mode == "verified":
-        # Combined anti-fake check: must have profile photo + username + not bot
+    # ALL modes (except 'off' and 'premium') require CAPTCHA verification first.
+    # This eliminates bots without needing a separate 'no_bots' mode.
+    if mode not in ("off", "premium"):
         if user.is_bot:
             accepted = False
             reason = "Bot account"
-        else:
-            # Check profile photos
-            has_photo = False
+            # Skip to decision
             try:
-                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
-                has_photo = photos.total_count > 0
-            except Exception:
-                has_photo = True  # fail-open on API error
-
-            has_username = bool(user.username)
-            name_ok = bool(user.first_name) and len(user.first_name.strip()) > 1
-
-            if has_photo and has_username and name_ok:
-                accepted = True
-            else:
-                accepted = False
-                reasons = []
-                if not has_photo:
-                    reasons.append("no profile photo")
-                if not has_username:
-                    reasons.append("no username")
-                if not name_ok:
-                    reasons.append("invalid name")
-                reason = "Failed verification: " + ", ".join(reasons)
-
-    elif mode == "photo_required":
-        # Must have at least one profile photo (simplest anti-fake)
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            try:
-                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
-                if photos.total_count > 0:
-                    accepted = True
+                if accepted:
+                    await request.approve()
                 else:
-                    accepted = False
-                    reason = "No profile photo"
+                    await request.decline()
+            except Exception as e:
+                logger.error("Failed to process join request for user %s: %s", user.id, e)
+            return
+
+        # Check CAPTCHA verification
+        async with async_session() as session:
+            result = await session.execute(
+                select(UserSettings).where(UserSettings.user_id == user.id)
+            )
+            user_settings = result.scalar_one_or_none()
+
+        is_verified = user_settings.captcha_verified if user_settings else False
+
+        if not is_verified:
+            # Not verified — decline and DM instructions
+            try:
+                await request.decline()
             except Exception:
-                accepted = True  # fail-open
+                pass
+            try:
+                bot_username = context.bot.username
+                await context.bot.send_message(
+                    user.id,
+                    f"👋 Guruhga qo'shilish uchun avval tekshiruvdan o'ting:\n"
+                    f"https://t.me/{bot_username}?start=verify\n\n"
+                    f"CAPTCHA ni yeching, keyin qayta so'rov yuboring.",
+                )
+            except Exception:
+                pass
+            # Update stats
+            async with async_session() as session:
+                result = await session.execute(select(JoinFilter).where(JoinFilter.chat_id == chat_id))
+                cfg = result.scalar_one_or_none()
+                if cfg:
+                    cfg.rejected = (cfg.rejected or 0) + 1
+                    await session.commit()
+            return
+
+    # Now apply mode-specific filter (user is already CAPTCHA-verified at this point)
+    if mode == "all":
+        accepted = True
+
+    elif mode == "females":
+        gender = user_settings.gender if user_settings else None
+        if gender == "female":
+            accepted = True
+        elif gender == "male":
+            accepted = False
+            reason = "Only female users accepted"
+        else:
+            # Gender not set — fallback to name heuristic
+            guessed = _guess_gender(user.first_name)
+            accepted = (guessed == "female")
+            if not accepted:
+                reason = "Only female users accepted"
+
+    elif mode == "males":
+        gender = user_settings.gender if user_settings else None
+        if gender == "male":
+            accepted = True
+        elif gender == "female":
+            accepted = False
+            reason = "Only male users accepted"
+        else:
+            guessed = _guess_gender(user.first_name)
+            accepted = (guessed == "male")
+            if not accepted:
+                reason = "Only male users accepted"
+
+    elif mode == "subscribed":
+        channels = parse_channels(config.required_channels)
+        if channels:
+            missing = await get_unsubscribed(context.bot, user.id, channels)
+            if missing:
+                accepted = False
+                reason = f"Must subscribe to: {', '.join(missing)}"
+            else:
+                accepted = True
+        else:
+            accepted = True
 
     elif mode == "premium":
-        # Only Telegram Premium users (strongest anti-fake — they paid real money)
+        # Premium doesn't require CAPTCHA — it's its own strong verification
         if user.is_bot:
             accepted = False
             reason = "Bot"
         else:
             is_premium = getattr(user, "is_premium", False)
-            if is_premium:
-                accepted = True
-            else:
-                accepted = False
+            accepted = bool(is_premium)
+            if not accepted:
                 reason = "Premium subscription required"
 
-    elif mode == "strict":
-        # Strictest: must have photo + username + passed CAPTCHA
-        if user.is_bot:
-            accepted = False
-            reason = "Bot"
-        else:
-            # Check profile photo
-            has_photo = False
-            try:
-                photos = await context.bot.get_user_profile_photos(user.id, limit=1)
-                has_photo = photos.total_count > 0
-            except Exception:
-                has_photo = True
-
-            has_username = bool(user.username)
-
-            # Check if CAPTCHA-verified
-            is_captcha_verified = False
-            async with async_session() as session:
-                result = await session.execute(
-                    select(UserSettings).where(UserSettings.user_id == user.id)
-                )
-                settings = result.scalar_one_or_none()
-                is_captcha_verified = settings.captcha_verified if settings else False
-
-            if has_photo and has_username and is_captcha_verified:
-                accepted = True
-            else:
-                accepted = False
-                reasons = []
-                if not has_photo:
-                    reasons.append("no photo")
-                if not has_username:
-                    reasons.append("no username")
-                if not is_captcha_verified:
-                    reasons.append("CAPTCHA not passed")
-                reason = "Strict check failed: " + ", ".join(reasons)
-
-                # DM to verify
-                if not is_captcha_verified:
-                    try:
-                        bot_username = context.bot.username
-                        await context.bot.send_message(
-                            user.id,
-                            f"👋 Qo'shilish uchun:\n"
-                            f"1. CAPTCHA yeching: https://t.me/{bot_username}?start=verify\n"
-                            f"2. Profil rasmingiz bo'lishi kerak\n"
-                            f"3. @username o'rnatilgan bo'lishi kerak\n\n"
-                            f"Keyin qayta so'rov yuboring.",
-                        )
-                    except Exception:
-                        pass
+    elif mode == "off":
+        return  # Do nothing
 
     else:
-        # Unknown mode → skip
         return
 
     # Execute decision
@@ -396,22 +275,19 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Configure join request filter. Command: /joinfilter <mode> [channels]
 
     Modes:
-      all            — Accept everyone
-      no_bots        — Reject bots, accept all humans
-      females        — Only accept female names
-      males          — Only accept male names
+      all            — Accept everyone (who passed CAPTCHA)
+      females        — Only accept female users
+      males          — Only accept male users
       subscribed     — Must be subscribed to channels (provide channels after mode)
-      started        — Must have started the bot
-      verified       — Must have profile photo + username + real name
-      photo_required — Must have at least one profile photo
       premium        — Only Telegram Premium users
-      strict         — Must have photo + username + started bot (strictest)
       off            — Disable filtering (manual review)
+
+    All modes (except premium/off) automatically require CAPTCHA verification.
+    Bots and unverified users are declined automatically.
 
     Examples:
       /joinfilter all
-      /joinfilter verified
-      /joinfilter strict
+      /joinfilter females
       /joinfilter subscribed @channel1, @channel2
       /joinfilter off
     """
@@ -450,16 +326,12 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 "📋 <b>Join Request Filter</b>\n\n"
                 "Hozircha sozlanmagan. Sozlash:\n\n"
+                "⚠️ Barcha rejimlar avtomatik CAPTCHA talab qiladi (botlar o'tolmaydi).\n\n"
                 "<code>/joinfilter all</code> — hammani qabul qilish\n"
-                "<code>/joinfilter no_bots</code> — botlarni rad etish\n"
                 "<code>/joinfilter females</code> — faqat ayollar\n"
                 "<code>/joinfilter males</code> — faqat erkaklar\n"
                 "<code>/joinfilter subscribed @ch1,@ch2</code> — obuna bo'lganlar\n"
-                "<code>/joinfilter started</code> — botni ishga tushirganlar\n"
-                "<code>/joinfilter verified</code> — 🛡 tasdiqlangan (rasm + username + ism)\n"
-                "<code>/joinfilter photo_required</code> — 📷 profil rasmi bor\n"
                 "<code>/joinfilter premium</code> — ⭐ faqat Premium\n"
-                "<code>/joinfilter strict</code> — 🔒 qattiq (rasm + username + bot boshlagan)\n"
                 "<code>/joinfilter off</code> — o'chirish",
                 parse_mode="HTML",
             )
@@ -479,7 +351,7 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     mode = context.args[0].lower()
-    valid_modes = ("all", "no_bots", "females", "males", "subscribed", "started", "verified", "photo_required", "premium", "strict", "off")
+    valid_modes = ("all", "females", "males", "subscribed", "premium", "off")
 
     if mode not in valid_modes:
         await update.message.reply_text(
@@ -521,16 +393,11 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await session.commit()
 
     mode_labels = {
-        "all": "✅ Hammani qabul qilish",
-        "no_bots": "🤖❌ Botlarni rad etish",
+        "all": "✅ Hammani qabul qilish (CAPTCHA o'tganlar)",
         "females": "👩 Faqat ayollar",
         "males": "👨 Faqat erkaklar",
         "subscribed": f"📢 Obuna bo'lganlar ({channels_str or 'kanallar kerak'})",
-        "started": "🤖 Botni ishga tushirganlar",
-        "verified": "🛡 Tasdiqlangan (rasm + username + ism)",
-        "photo_required": "📷 Profil rasmi bor",
         "premium": "⭐ Faqat Premium foydalanuvchilar",
-        "strict": "🔒 Qattiq tekshiruv (rasm + username + bot ishga tushirilgan)",
         "off": "❌ O'chirilgan (qo'lda ko'rib chiqish)",
     }
 
