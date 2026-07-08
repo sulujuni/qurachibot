@@ -269,57 +269,30 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "Bu funksiya yordamida yopiq kanal yoki guruhga kelib tushadigan "
             "barcha <b>qo'shilish so'rovlarini avtomatik qabul qilish</b> mumkin.\n\n"
             "📌 <b>Qanday sozlash:</b>\n"
-            "1. Botni kanalingizga <b>admin</b> sifatida qo'shing (pastdagi tugma)\n"
-            "2. Shu yerda kanalingiz @username sini kiriting:\n\n"
-            "<code>/joinfilter all @kanalingiz</code>\n\n"
-            "Yoki Mini App → Profil → So'rovlarni boshqarish orqali sozlang.\n\n"
-            "🔸 <b>Rejimlar:</b>\n"
-            "• <code>all</code> — hammani avtomatik qabul qilish\n"
-            "• <code>females</code> — faqat ayollar\n"
-            "• <code>males</code> — faqat erkaklar\n"
-            "• <code>subscribed @ch1</code> — obuna shart\n"
-            "• <code>premium</code> — faqat Premium\n"
-            "• <code>off</code> — o'chirish\n\n"
-            "💡 <b>Misol:</b>\n"
-            "<code>/joinfilter all @your_channel</code>"
+            "1. Pastdagi tugma orqali botni kanalga admin qiling\n"
+            "2. Keyin kanalingiz @username sini yuboring\n"
+            "3. Bot avtomatik sozlaydi!\n\n"
+            "👇 <b>Avval botni kanalga qo'shing:</b>"
         ),
         "ru": (
             "🚪 <b>Управление заявками на вступление</b>\n\n"
             "Эта функция автоматически принимает все <b>заявки на вступление</b> "
             "в ваш закрытый канал или группу.\n\n"
             "📌 <b>Как настроить:</b>\n"
-            "1. Добавьте бота в канал как <b>администратора</b> (кнопка ниже)\n"
-            "2. Введите здесь @username вашего канала:\n\n"
-            "<code>/joinfilter all @ваш_канал</code>\n\n"
-            "Или настройте через Мини Приложение → Профиль → Управление заявками.\n\n"
-            "🔸 <b>Режимы:</b>\n"
-            "• <code>all</code> — принимать всех\n"
-            "• <code>females</code> — только девушки\n"
-            "• <code>males</code> — только парни\n"
-            "• <code>subscribed @ch1</code> — подписчики\n"
-            "• <code>premium</code> — только Premium\n"
-            "• <code>off</code> — выключить\n\n"
-            "💡 <b>Пример:</b>\n"
-            "<code>/joinfilter all @your_channel</code>"
+            "1. Добавьте бота в канал как админа (кнопка ниже)\n"
+            "2. Потом отправьте @username вашего канала\n"
+            "3. Бот настроит автоматически!\n\n"
+            "👇 <b>Сначала добавьте бота в канал:</b>"
         ),
         "en": (
             "🚪 <b>Manage Join Requests</b>\n\n"
             "This feature automatically accepts all <b>join requests</b> "
             "to your private channel or group.\n\n"
             "📌 <b>How to set up:</b>\n"
-            "1. Add the bot to your channel as an <b>admin</b> (button below)\n"
-            "2. Enter your channel's @username here:\n\n"
-            "<code>/joinfilter all @your_channel</code>\n\n"
-            "Or set it up via Mini App → Profile → Join Requests.\n\n"
-            "🔸 <b>Modes:</b>\n"
-            "• <code>all</code> — accept everyone\n"
-            "• <code>females</code> — females only\n"
-            "• <code>males</code> — males only\n"
-            "• <code>subscribed @ch1</code> — subscribers\n"
-            "• <code>premium</code> — Premium only\n"
-            "• <code>off</code> — disable\n\n"
-            "💡 <b>Example:</b>\n"
-            "<code>/joinfilter all @your_channel</code>"
+            "1. Add the bot to your channel as admin (button below)\n"
+            "2. Then send your channel's @username\n"
+            "3. Bot will configure automatically!\n\n"
+            "👇 <b>First, add the bot to your channel:</b>"
         ),
     }
 
@@ -332,9 +305,151 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             else "➕ Add to channel/group",
             url=f"https://t.me/{bot_username}?startgroup=true&admin=invite_users"
         )],
+        [InlineKeyboardButton(
+            "✅ Qo'shdim, davom etish" if lang == "uz"
+            else "✅ Добавил, продолжить" if lang == "ru"
+            else "✅ Added, continue",
+            callback_data="jf_setup_start"
+        )],
     ])
 
     await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# ─── Join Filter interactive setup (button-based) ────────────────────────────
+
+
+async def jf_setup_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User tapped 'Added, continue' — ask for channel @username."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = await get_user_lang(user_id)
+
+    texts = {
+        "uz": "👇 Kanalingiz @username sini yuboring:\n\n<i>Masalan: @your_channel</i>",
+        "ru": "👇 Отправьте @username вашего канала:\n\n<i>Например: @your_channel</i>",
+        "en": "👇 Send your channel's @username:\n\n<i>Example: @your_channel</i>",
+    }
+    await query.edit_message_text(texts.get(lang, texts["uz"]), parse_mode="HTML")
+    context.user_data["jf_awaiting_channel"] = True
+
+
+async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Receive channel @username and show mode selection buttons."""
+    if not context.user_data.get("jf_awaiting_channel"):
+        return
+
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    channel = update.message.text.strip()
+
+    if not channel.startswith("@"):
+        channel = "@" + channel
+
+    # Verify bot is admin in the channel
+    try:
+        chat = await context.bot.get_chat(channel)
+        bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
+        if bot_member.status not in ("administrator", "creator"):
+            await update.message.reply_text(
+                "❌ Bot bu kanalda admin emas!\n\n"
+                "Avval botni kanalga admin sifatida qo'shing." if lang == "uz"
+                else "❌ Бот не админ в этом канале!\n\nСначала добавьте бота как админа." if lang == "ru"
+                else "❌ Bot is not admin in this channel!\n\nAdd the bot as admin first."
+            )
+            return
+    except Exception:
+        await update.message.reply_text(
+            "❌ Kanal topilmadi! @username to'g'ri ekanligini tekshiring." if lang == "uz"
+            else "❌ Канал не найден! Проверьте @username." if lang == "ru"
+            else "❌ Channel not found! Check the @username."
+        )
+        return
+
+    # Store channel info
+    context.user_data["jf_awaiting_channel"] = False
+    context.user_data["jf_channel_id"] = chat.id
+    context.user_data["jf_channel_title"] = chat.title
+
+    # Show mode selection buttons
+    texts = {
+        "uz": f"✅ <b>{chat.title}</b> topildi!\n\nRejimni tanlang:",
+        "ru": f"✅ <b>{chat.title}</b> найден!\n\nВыберите режим:",
+        "en": f"✅ <b>{chat.title}</b> found!\n\nChoose mode:",
+    }
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Hammani qabul qilish", callback_data="jf_mode_all")],
+        [InlineKeyboardButton("👩 Faqat ayollar", callback_data="jf_mode_females"),
+         InlineKeyboardButton("👨 Faqat erkaklar", callback_data="jf_mode_males")],
+        [InlineKeyboardButton("⭐ Faqat Premium", callback_data="jf_mode_premium")],
+        [InlineKeyboardButton("❌ O'chirish", callback_data="jf_mode_off")],
+    ])
+
+    await update.message.reply_text(texts.get(lang, texts["uz"]), reply_markup=keyboard, parse_mode="HTML")
+
+
+async def jf_mode_selected_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """User selected a mode — save the join filter config."""
+    query = update.callback_query
+    await query.answer()
+
+    mode = query.data.replace("jf_mode_", "")  # "all", "females", "males", "premium", "off"
+    channel_id = context.user_data.get("jf_channel_id")
+    channel_title = context.user_data.get("jf_channel_title", "")
+
+    if not channel_id:
+        await query.edit_message_text("❌ Xatolik. Qaytadan urinib ko'ring: /start")
+        return
+
+    # Save to database
+    from bot.handlers.join_request import JoinFilter
+    from bot.models.database import async_session as db_session
+    from sqlalchemy import select as sql_select
+
+    async with db_session() as session:
+        result = await session.execute(
+            sql_select(JoinFilter).where(JoinFilter.chat_id == channel_id)
+        )
+        config = result.scalar_one_or_none()
+
+        if config:
+            config.filter_mode = mode
+            config.enabled = (mode != "off")
+            config.chat_title = channel_title
+        else:
+            config = JoinFilter(
+                chat_id=channel_id,
+                chat_title=channel_title,
+                filter_mode=mode,
+                enabled=(mode != "off"),
+            )
+            session.add(config)
+        await session.commit()
+
+    # Clean up user_data
+    context.user_data.pop("jf_channel_id", None)
+    context.user_data.pop("jf_channel_title", None)
+
+    mode_labels = {
+        "all": "✅ Hammani qabul qilish",
+        "females": "👩 Faqat ayollar",
+        "males": "👨 Faqat erkaklar",
+        "premium": "⭐ Faqat Premium",
+        "off": "❌ O'chirilgan",
+    }
+
+    await query.edit_message_text(
+        f"✅ <b>Tayyor!</b>\n\n"
+        f"📢 Kanal: <b>{channel_title}</b>\n"
+        f"📋 Rejim: {mode_labels.get(mode, mode)}\n\n"
+        f"Bot endi barcha qo'shilish so'rovlarini avtomatik ko'rib chiqadi.",
+        parse_mode="HTML",
+    )
+
+
+# ─── CAPTCHA answer handler ──────────────────────────────────────────────────
 
 
 async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -343,6 +458,11 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
     IMPORTANT: This handler only processes messages when user_data has 
     'awaiting_captcha' = True. Otherwise it does NOTHING (passes through).
     """
+    # Join filter: check if awaiting channel @username
+    if context.user_data.get("jf_awaiting_channel"):
+        await jf_receive_channel(update, context)
+        return
+
     if not context.user_data.get("awaiting_captcha"):
         return  # Not waiting for captcha — let other handlers process this
 
@@ -449,6 +569,9 @@ def get_common_handlers() -> list:
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
         # Gender callback from /start captcha flow
         CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
+        # Join filter setup callbacks
+        CallbackQueryHandler(jf_setup_start_callback, pattern=r"^jf_setup_start$"),
+        CallbackQueryHandler(jf_mode_selected_callback, pattern=r"^jf_mode_"),
         # Reply keyboard button handlers (all 3 languages)
         MessageHandler(filters.Regex(r"^(🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
         MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
