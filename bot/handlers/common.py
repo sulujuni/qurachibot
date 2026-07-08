@@ -11,6 +11,33 @@ from bot.utils.lang import get_user_lang, set_user_lang, t
 from bot.utils.referral import parse_referral_payload, process_referral
 from bot.handlers.captcha_handler import is_user_verified
 
+# ─── Reply Keyboard Menu (persistent buttons at the bottom) ──────────────────
+
+from telegram import ReplyKeyboardMarkup, KeyboardButton
+
+
+def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
+    """Build the main menu reply keyboard based on language."""
+    menus = {
+        "uz": [
+            ["🎲 Yutuqli o'yin yaratish", "📋 Mening o'yinlarim"],
+            ["🏅 Konkurs yaratish", "🏆 Reyting"],
+            ["👥 Do'st taklif qilish", "⚙️ Sozlamalar"],
+        ],
+        "ru": [
+            ["🎲 Создать розыгрыш", "📋 Мои розыгрыши"],
+            ["🏅 Создать конкурс", "🏆 Рейтинг"],
+            ["👥 Пригласить друга", "⚙️ Настройки"],
+        ],
+        "en": [
+            ["🎲 Create Giveaway", "📋 My Giveaways"],
+            ["🏅 Create Contest", "🏆 Leaderboard"],
+            ["👥 Invite Friends", "⚙️ Settings"],
+        ],
+    }
+    buttons = menus.get(lang, menus["uz"])
+    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+
 logger = logging.getLogger(__name__)
 
 # Language display names
@@ -34,7 +61,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Always respond first so users get instant feedback, even under heavy load.
     text = await t("welcome", user_id)
-    await update.message.reply_text(text, parse_mode="HTML")
+    lang = await get_user_lang(user_id)
+    await update.message.reply_text(
+        text, parse_mode="HTML", reply_markup=get_main_menu_keyboard(lang)
+    )
 
     # Referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
     # Recorded with verify_subscription=False → pure DB, no Telegram call here.
@@ -114,6 +144,15 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     text = get_text("lang_set", lang=lang_code, lang_name=lang_name)
     await query.edit_message_text(text, parse_mode="HTML")
 
+    # Update the reply keyboard to match new language
+    try:
+        await context.bot.send_message(
+            user_id, "✅",
+            reply_markup=get_main_menu_keyboard(lang_code),
+        )
+    except Exception:
+        pass
+
 
 async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Open the Mini App. Command: /dashboard"""
@@ -167,6 +206,60 @@ async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     await open_miniapp_tab(update, context, "leaders")
 
 
+# ─── Reply Keyboard Menu Handlers ────────────────────────────────────────────
+
+
+async def menu_create_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🎲 Create Giveaway' button tap."""
+    web_url = settings.WEB_URL
+    if web_url:
+        await open_miniapp_tab(update, context, "create")
+    else:
+        # Fallback: trigger /newgiveaway command
+        from bot.handlers.giveaway import new_giveaway_start
+        await new_giveaway_start(update, context)
+
+
+async def menu_my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '📋 My Giveaways' button tap."""
+    web_url = settings.WEB_URL
+    if web_url:
+        await open_miniapp_tab(update, context, "games")
+    else:
+        from bot.handlers.giveaway import my_giveaways
+        await my_giveaways(update, context)
+
+
+async def menu_create_contest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🏅 Create Contest' button tap."""
+    web_url = settings.WEB_URL
+    if web_url:
+        await open_miniapp_tab(update, context, "create")
+    else:
+        from bot.handlers.contest import new_contest_start
+        await new_contest_start(update, context)
+
+
+async def menu_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🏆 Leaderboard' button tap."""
+    await open_miniapp_tab(update, context, "leaders")
+
+
+async def menu_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '👥 Invite Friends' button tap."""
+    from bot.handlers.referral_handler import referral_command
+    await referral_command(update, context)
+
+
+async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '⚙️ Settings' button tap."""
+    web_url = settings.WEB_URL
+    if web_url:
+        await open_miniapp_tab(update, context, "profile")
+    else:
+        await lang_command(update, context)
+
+
 def get_common_handlers() -> list:
     """Return common command handlers."""
     return [
@@ -177,4 +270,11 @@ def get_common_handlers() -> list:
         CommandHandler("leaderboard", leaderboard_command),
         CommandHandler("lang", lang_command),
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
+        # Reply keyboard button handlers (all 3 languages)
+        MessageHandler(filters.Regex(r"^(🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
+        MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
+        MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
+        MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
+        MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
+        MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
     ]
