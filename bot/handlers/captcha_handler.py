@@ -173,6 +173,29 @@ async def gender_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "Davom etish uchun /help ni bosing.",
         parse_mode="HTML",
     )
+
+    # Auto-approve any pending join requests for this user
+    pending = context.bot_data.get("pending_joins", {}).pop(user_id, None)
+    if pending:
+        try:
+            await context.bot.approve_chat_join_request(
+                chat_id=pending["chat_id"],
+                user_id=user_id,
+            )
+            chat_title = ""
+            try:
+                chat = await context.bot.get_chat(pending["chat_id"])
+                chat_title = chat.title or ""
+            except Exception:
+                pass
+            await context.bot.send_message(
+                user_id,
+                f"✅ Siz <b>{chat_title}</b> ga qo'shildingiz!",
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.warning("Failed to auto-approve join for user %s: %s", user_id, e)
+
     return ConversationHandler.END
 
 

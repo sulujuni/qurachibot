@@ -158,28 +158,28 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         is_verified = user_settings.captcha_verified if user_settings else False
 
         if not is_verified:
-            # Not verified — decline and DM instructions
-            try:
-                await request.decline()
-            except Exception:
-                pass
+            # Not verified yet — DON'T reject! Leave request pending and DM instructions.
+            # The user may have never interacted with our bot before.
+            # After they pass CAPTCHA, we'll auto-approve (stored in pending_joins).
             try:
                 bot_username = context.bot.username
                 await context.bot.send_message(
                     user.id,
-                    f"👋 Guruhga qo'shilish uchun avval tekshiruvdan o'ting:\n"
-                    f"https://t.me/{bot_username}?start=verify\n\n"
-                    f"CAPTCHA ni yeching, keyin qayta so'rov yuboring.",
+                    f"👋 <b>Salom!</b>\n\n"
+                    f"Kanalga qo'shilish uchun oddiy tekshiruvdan o'ting.\n"
+                    f"Bu botlardan himoyalanish uchun kerak — bir marta yechsangiz bas!\n\n"
+                    f"👇 Bosing:\n/verify",
+                    parse_mode="HTML",
                 )
             except Exception:
+                # Can't DM — user hasn't started bot. Leave request for manual review.
                 pass
-            # Update stats
-            async with async_session() as session:
-                result = await session.execute(select(JoinFilter).where(JoinFilter.chat_id == chat_id))
-                cfg = result.scalar_one_or_none()
-                if cfg:
-                    cfg.rejected = (cfg.rejected or 0) + 1
-                    await session.commit()
+            # Store pending join request info so we can auto-approve later
+            context.bot_data.setdefault("pending_joins", {})[user.id] = {
+                "chat_id": chat_id,
+                "user_id": user.id,
+            }
+            # DON'T decline — leave the request pending
             return
 
     # Now apply mode-specific filter (user is already CAPTCHA-verified at this point)
