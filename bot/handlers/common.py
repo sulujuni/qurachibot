@@ -474,12 +474,8 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     channel_id = None
     channel_title = None
 
-    # Method 1: Forwarded message from a channel (works for private channels!)
-    if message.forward_from_chat:
-        channel_id = message.forward_from_chat.id
-        channel_title = message.forward_from_chat.title
-    # Method 2: forward_origin (newer PTB/API versions)
-    elif hasattr(message, 'forward_origin') and message.forward_origin:
+    # Method 1: forward_origin (PTB 21.x / Bot API 7.x — current standard)
+    if hasattr(message, 'forward_origin') and message.forward_origin:
         origin = message.forward_origin
         if hasattr(origin, 'chat') and origin.chat:
             channel_id = origin.chat.id
@@ -487,8 +483,12 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif hasattr(origin, 'sender_chat') and origin.sender_chat:
             channel_id = origin.sender_chat.id
             channel_title = origin.sender_chat.title
-    # Method 3: sender_chat (when channel post is forwarded)
-    elif hasattr(message, 'sender_chat') and message.sender_chat:
+    # Method 2: forward_from_chat (older API, deprecated but may still work)
+    elif getattr(message, 'forward_from_chat', None):
+        channel_id = message.forward_from_chat.id
+        channel_title = message.forward_from_chat.title
+    # Method 3: sender_chat
+    elif getattr(message, 'sender_chat', None):
         channel_id = message.sender_chat.id
         channel_title = message.sender_chat.title
     # Method 4: forward_from (user forwarded from another user/bot — not useful)
@@ -513,7 +513,7 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not channel_id:
         # Debug info to help identify the issue
         debug_info = []
-        if message.forward_from_chat:
+        if getattr(message, 'forward_from_chat', None):
             debug_info.append(f"forward_from_chat: {message.forward_from_chat}")
         if hasattr(message, 'forward_origin') and message.forward_origin:
             debug_info.append(f"forward_origin: {message.forward_origin}")
