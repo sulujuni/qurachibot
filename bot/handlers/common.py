@@ -72,9 +72,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if context.args:
         payload = context.args[0]
         # Handle /start verify (from captcha prompt button)
+        # The captcha ConversationHandler catches this as an entry point,
+        # but if it somehow reaches here, just prompt /verify
         if payload == "verify":
-            from bot.handlers.captcha_handler import send_captcha
-            await send_captcha(update, context)
             return
 
         referrer_id, giveaway_id = parse_referral_payload(payload)

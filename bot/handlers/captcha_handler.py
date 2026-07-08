@@ -211,13 +211,31 @@ async def require_verification(update: Update, context: ContextTypes.DEFAULT_TYP
     return False
 
 
+async def start_verify_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point for /start verify deep link — triggers CAPTCHA directly."""
+    if context.args and context.args[0] == "verify":
+        return await send_captcha(update, context)
+    return ConversationHandler.END
+
+
+class _VerifyStartFilter(filters.MessageFilter):
+    """Custom filter that matches /start with 'verify' argument."""
+    def filter(self, message) -> bool:
+        if not message.text:
+            return False
+        return message.text.strip() == "/start verify" or message.text.strip().startswith("/start verify")
+
+
 # ─── Handler Registration ────────────────────────────────────────────────────────
 
 
 def get_captcha_handlers() -> list:
     """Return captcha verification handlers."""
     captcha_conv = ConversationHandler(
-        entry_points=[CommandHandler("verify", send_captcha)],
+        entry_points=[
+            CommandHandler("verify", send_captcha),
+            MessageHandler(_VerifyStartFilter(), start_verify_entry),
+        ],
         states={
             AWAITING_ANSWER: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, check_answer),
