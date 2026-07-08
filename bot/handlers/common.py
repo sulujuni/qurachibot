@@ -354,10 +354,16 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            "➕ Kanalga/guruhga qo'shish" if lang == "uz"
-            else "➕ Добавить в канал/группу" if lang == "ru"
-            else "➕ Add to channel/group",
-            url=f"https://t.me/{bot_username}?startgroup=true&admin=invite_users"
+            "➕ Guruhga qo'shish" if lang == "uz"
+            else "➕ Добавить в группу" if lang == "ru"
+            else "➕ Add to group",
+            url=f"https://t.me/{bot_username}?startgroup=true&admin=invite_users+manage_chat"
+        )],
+        [InlineKeyboardButton(
+            "📢 Kanalga qo'shish (qo'llanma)" if lang == "uz"
+            else "📢 Добавить в канал (инструкция)" if lang == "ru"
+            else "📢 Add to channel (how-to)",
+            callback_data="jf_channel_howto"
         )],
         [InlineKeyboardButton(
             "✅ Qo'shdim, davom etish" if lang == "uz"
@@ -371,6 +377,53 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 # ─── Join Filter interactive setup (button-based) ────────────────────────────
+
+
+async def jf_channel_howto_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show how to add bot to a channel (can't be done via deep link)."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = await get_user_lang(user_id)
+    bot_username = context.bot.username
+
+    texts = {
+        "uz": (
+            "📢 <b>Botni kanalga qo'shish:</b>\n\n"
+            "1. Kanalingizni oching\n"
+            "2. Kanal nomi → \"Boshqarish\" (⚙️)\n"
+            "3. \"Administratorlar\" → \"Admin qo'shish\"\n"
+            f"4. <code>@{bot_username}</code> ni qidiring\n"
+            "5. \"Foydalanuvchilarni taklif qilish\" huquqini bering\n"
+            "6. Saqlang ✅\n\n"
+            "Keyin \"✅ Qo'shdim\" tugmasini bosing."
+        ),
+        "ru": (
+            "📢 <b>Как добавить бота в канал:</b>\n\n"
+            "1. Откройте канал\n"
+            "2. Имя канала → «Управление» (⚙️)\n"
+            "3. «Администраторы» → «Добавить админа»\n"
+            f"4. Найдите <code>@{bot_username}</code>\n"
+            "5. Дайте право «Приглашать пользователей»\n"
+            "6. Сохраните ✅\n\n"
+            "Потом нажмите «✅ Добавил»."
+        ),
+        "en": (
+            "📢 <b>How to add bot to a channel:</b>\n\n"
+            "1. Open your channel\n"
+            "2. Channel name → \"Manage\" (⚙️)\n"
+            "3. \"Administrators\" → \"Add Admin\"\n"
+            f"4. Search for <code>@{bot_username}</code>\n"
+            "5. Enable \"Invite Users via Link\" permission\n"
+            "6. Save ✅\n\n"
+            "Then tap \"✅ Added\"."
+        ),
+    }
+
+    await query.edit_message_text(
+        texts.get(lang, texts["uz"]),
+        parse_mode="HTML",
+    )
 
 
 async def jf_setup_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -674,6 +727,7 @@ def get_common_handlers() -> list:
         # Gender callback from /start captcha flow
         CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
         # Join filter setup callbacks
+        CallbackQueryHandler(jf_channel_howto_callback, pattern=r"^jf_channel_howto$"),
         CallbackQueryHandler(jf_setup_start_callback, pattern=r"^jf_setup_start$"),
         CallbackQueryHandler(jf_mode_selected_callback, pattern=r"^jf_mode_"),
         # Reply keyboard button handlers (all 3 languages)
