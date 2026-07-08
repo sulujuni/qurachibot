@@ -1135,6 +1135,26 @@ async function renderProfile() {
             <div class="card-title">🚪 ${t('join_filter_title')}</div>
             <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">${t('join_filter_desc')}</p>`;
 
+        // Explanation box
+        const explanations = {
+            uz: `<div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+                <b>ℹ️ Qanday ishlaydi:</b><br><br>
+                <b>"all" rejimi</b> — eng ko'p ishlatiladigan. Minglab join so'rovlarini qo'lda qabul qilish o'rniga bot avtomatik qabul qiladi. Hech qanday tekshiruv yo'q — hamma kirib oladi.<br><br>
+                <b>Boshqa rejimlar</b> (females/males/subscribed) — faqat avval <b>botda CAPTCHA tekshiruvidan o'tgan</b> foydalanuvchilarga ishlaydi. Botni bilmagan odamlar uchun so'rov kutib turadi (bot ularga DM yuboradi).
+            </div>`,
+            ru: `<div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+                <b>ℹ️ Как это работает:</b><br><br>
+                <b>Режим "all"</b> — самый популярный. Вместо ручного одобрения тысяч заявок, бот автоматически принимает всех. Никаких проверок — все заходят.<br><br>
+                <b>Другие режимы</b> (females/males/subscribed) — работают только для тех, кто прошёл <b>CAPTCHA в боте</b>. Для остальных заявка остаётся на рассмотрении (бот отправит DM).
+            </div>`,
+            en: `<div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin-bottom:14px;font-size:12px;">
+                <b>ℹ️ How it works:</b><br><br>
+                <b>"all" mode</b> — most popular. Instead of manually approving thousands of requests, the bot accepts everyone automatically. No checks needed.<br><br>
+                <b>Other modes</b> (females/males/subscribed) — only work for users who passed <b>CAPTCHA in the bot</b>. For others, the request stays pending (bot sends them a DM).
+            </div>`,
+        };
+        html += explanations[currentLang] || explanations.uz;
+
         if (filters.length) {
             filters.forEach(f => {
                 html += `<div class="game-item">
@@ -1161,11 +1181,10 @@ async function renderProfile() {
                     <label class="form-label">${t('mode')}</label>
                     <select class="form-select" id="jfMode">
                         <option value="all">${filterModeLabel('all')}</option>
-                        <option value="no_bots">${filterModeLabel('no_bots')}</option>
                         <option value="females">${filterModeLabel('females')}</option>
                         <option value="males">${filterModeLabel('males')}</option>
                         <option value="subscribed">${filterModeLabel('subscribed')}</option>
-                        <option value="started">${filterModeLabel('started')}</option>
+                        <option value="premium">${filterModeLabel('premium')}</option>
                         <option value="off">${filterModeLabel('off')}</option>
                     </select>
                 </div>
@@ -1192,9 +1211,9 @@ async function renderProfile() {
 
 function filterModeLabel(mode) {
     const labels = {
-        uz: {all:'✅ Hammani qabul qilish', no_bots:'🤖❌ Botlarni rad etish', females:'👩 Faqat ayollar', males:'👨 Faqat erkaklar', subscribed:'📢 Obuna bo\'lganlar', started:'🤖 Botni ishga tushirganlar', off:'⏸ O\'chirish'},
-        ru: {all:'✅ Принимать всех', no_bots:'🤖❌ Отклонять ботов', females:'👩 Только девушки', males:'👨 Только парни', subscribed:'📢 Подписчики', started:'🤖 Запустившие бота', off:'⏸ Выключить'},
-        en: {all:'✅ Accept everyone', no_bots:'🤖❌ Reject bots', females:'👩 Females only', males:'👨 Males only', subscribed:'📢 Subscribers only', started:'🤖 Bot starters', off:'⏸ Disable'},
+        uz: {all:'✅ Hammani avtomatik qabul qilish', females:'👩 Faqat ayollar (CAPTCHA kerak)', males:'👨 Faqat erkaklar (CAPTCHA kerak)', subscribed:'📢 Obuna bo\'lganlar', premium:'⭐ Faqat Premium', off:'⏸ O\'chirish'},
+        ru: {all:'✅ Принимать всех автоматически', females:'👩 Только девушки (нужна CAPTCHA)', males:'👨 Только парни (нужна CAPTCHA)', subscribed:'📢 Подписчики', premium:'⭐ Только Premium', off:'⏸ Выключить'},
+        en: {all:'✅ Accept everyone automatically', females:'👩 Females only (CAPTCHA required)', males:'👨 Males only (CAPTCHA required)', subscribed:'📢 Subscribers only', premium:'⭐ Premium only', off:'⏸ Disable'},
     };
     return (labels[currentLang] || labels.uz)[mode] || mode;
 }

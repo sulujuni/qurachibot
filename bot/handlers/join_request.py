@@ -134,7 +134,9 @@ async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # ALL modes (except 'off' and 'premium') require CAPTCHA verification first.
     # This eliminates bots without needing a separate 'no_bots' mode.
-    if mode not in ("off", "premium"):
+    # EXCEPTION: 'all' mode accepts everyone immediately (the main use case
+    # for admins who just want to auto-accept thousands of requests).
+    if mode not in ("off", "premium", "all"):
         if user.is_bot:
             accepted = False
             reason = "Bot account"
@@ -326,13 +328,20 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text(
                 "📋 <b>Join Request Filter</b>\n\n"
                 "Hozircha sozlanmagan. Sozlash:\n\n"
-                "⚠️ Barcha rejimlar avtomatik CAPTCHA talab qiladi (botlar o'tolmaydi).\n\n"
-                "<code>/joinfilter all</code> — hammani qabul qilish\n"
+                "🔹 <b>Asosiy funksiya:</b>\n"
+                "Minglab join so'rovlarini qo'lda qabul qilish o'rniga, "
+                "bot avtomatik qabul qiladi.\n\n"
+                "<code>/joinfilter all</code> — ✅ <b>hammani avtomatik qabul qilish</b>\n"
+                "<i>(Eng ko'p ishlatiladigan rejim — minglab so'rovlarni bir zumda qabul qiladi)</i>\n\n"
+                "🔸 <b>Qo'shimcha filtrlar</b> (faqat botdan o'tgan foydalanuvchilar uchun):\n"
                 "<code>/joinfilter females</code> — faqat ayollar\n"
                 "<code>/joinfilter males</code> — faqat erkaklar\n"
                 "<code>/joinfilter subscribed @ch1,@ch2</code> — obuna bo'lganlar\n"
-                "<code>/joinfilter premium</code> — ⭐ faqat Premium\n"
-                "<code>/joinfilter off</code> — o'chirish",
+                "<code>/joinfilter premium</code> — faqat Premium\n\n"
+                "⚠️ <b>Muhim:</b> females/males/subscribed rejimlar faqat avval botda "
+                "CAPTCHA tekshiruvidan o'tgan foydalanuvchilarga ishlaydi. "
+                "Botni bilmagan foydalanuvchilar uchun so'rov kutib turadi.\n\n"
+                "<code>/joinfilter off</code> — o'chirish (qo'lda ko'rib chiqish)",
                 parse_mode="HTML",
             )
         else:
@@ -393,9 +402,9 @@ async def joinfilter_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await session.commit()
 
     mode_labels = {
-        "all": "✅ Hammani qabul qilish (CAPTCHA o'tganlar)",
-        "females": "👩 Faqat ayollar",
-        "males": "👨 Faqat erkaklar",
+        "all": "✅ Hammani avtomatik qabul qilish (CAPTCHA talab qilinmaydi)",
+        "females": "👩 Faqat ayollar (CAPTCHA + jins tanlash talab qilinadi)",
+        "males": "👨 Faqat erkaklar (CAPTCHA + jins tanlash talab qilinadi)",
         "subscribed": f"📢 Obuna bo'lganlar ({channels_str or 'kanallar kerak'})",
         "premium": "⭐ Faqat Premium foydalanuvchilar",
         "off": "❌ O'chirilgan (qo'lda ko'rib chiqish)",
