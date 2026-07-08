@@ -320,63 +320,113 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def jf_setup_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """User tapped 'Added, continue' — ask for channel @username."""
+    """User tapped 'Added, continue' — ask to forward a message from the channel."""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     lang = await get_user_lang(user_id)
 
     texts = {
-        "uz": "👇 Kanalingiz @username sini yuboring:\n\n<i>Masalan: @your_channel</i>",
-        "ru": "👇 Отправьте @username вашего канала:\n\n<i>Например: @your_channel</i>",
-        "en": "👇 Send your channel's @username:\n\n<i>Example: @your_channel</i>",
+        "uz": (
+            "👇 Kanalingizdan istalgan <b>bitta xabarni</b> shu yerga forward qiling.\n\n"
+            "📌 <i>Qanday qilish: kanalga kiring → xabarni bosib turing → \"Forward\" → shu chatga yuboring</i>"
+        ),
+        "ru": (
+            "👇 <b>Перешлите</b> любое сообщение из вашего канала сюда.\n\n"
+            "📌 <i>Как: зайдите в канал → зажмите сообщение → \"Переслать\" → в этот чат</i>"
+        ),
+        "en": (
+            "👇 <b>Forward</b> any message from your channel here.\n\n"
+            "📌 <i>How: open channel → long-press a message → Forward → send to this chat</i>"
+        ),
     }
     await query.edit_message_text(texts.get(lang, texts["uz"]), parse_mode="HTML")
     context.user_data["jf_awaiting_channel"] = True
 
 
 async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Receive channel @username and show mode selection buttons."""
+    """Receive channel info — via forwarded message from channel."""
     if not context.user_data.get("jf_awaiting_channel"):
         return
 
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
-    channel = update.message.text.strip()
+    message = update.message
 
-    if not channel.startswith("@"):
-        channel = "@" + channel
+    channel_id = None
+    channel_title = None
+
+    # Method 1: Forwarded message from a channel (works for private channels!)
+    if message.forward_from_chat:
+        channel_id = message.forward_from_chat.id
+        channel_title = message.forward_from_chat.title
+    # Method 2: forward_origin (newer PTB/API versions)
+    elif hasattr(message, 'forward_origin') and message.forward_origin:
+        origin = message.forward_origin
+        if hasattr(origin, 'chat') and origin.chat:
+            channel_id = origin.chat.id
+            channel_title = origin.chat.title
+        elif hasattr(origin, 'sender_chat') and origin.sender_chat:
+            channel_id = origin.sender_chat.id
+            channel_title = origin.sender_chat.title
+    # Method 3: Text — @username or numeric ID (fallback)
+    elif message.text:
+        text = message.text.strip()
+        if text.startswith("@"):
+            try:
+                chat = await context.bot.get_chat(text)
+                channel_id = chat.id
+                channel_title = chat.title
+            except Exception:
+                pass
+        elif text.lstrip("-").isdigit():
+            try:
+                chat = await context.bot.get_chat(int(text))
+                channel_id = chat.id
+                channel_title = chat.title
+            except Exception:
+                pass
+
+    if not channel_id:
+        await message.reply_text(
+            "❌ Kanal aniqlanmadi.\n\n"
+            "📌 Kanaldan bitta xabarni shu yerga <b>forward</b> qiling." if lang == "uz"
+            else "❌ Канал не определён.\n\n"
+            "📌 <b>Перешлите</b> сообщение из канала сюда." if lang == "ru"
+            else "❌ Channel not detected.\n\n"
+            "📌 <b>Forward</b> a message from your channel here.",
+            parse_mode="HTML",
+        )
+        return
 
     # Verify bot is admin in the channel
     try:
-        chat = await context.bot.get_chat(channel)
-        bot_member = await context.bot.get_chat_member(chat.id, context.bot.id)
+        bot_member = await context.bot.get_chat_member(channel_id, context.bot.id)
         if bot_member.status not in ("administrator", "creator"):
-            await update.message.reply_text(
-                "❌ Bot bu kanalda admin emas!\n\n"
-                "Avval botni kanalga admin sifatida qo'shing." if lang == "uz"
+            await message.reply_text(
+                "❌ Bot bu kanalda admin emas!\n\nAvval botni kanalga admin sifatida qo'shing." if lang == "uz"
                 else "❌ Бот не админ в этом канале!\n\nСначала добавьте бота как админа." if lang == "ru"
                 else "❌ Bot is not admin in this channel!\n\nAdd the bot as admin first."
             )
             return
     except Exception:
-        await update.message.reply_text(
-            "❌ Kanal topilmadi! @username to'g'ri ekanligini tekshiring." if lang == "uz"
-            else "❌ Канал не найден! Проверьте @username." if lang == "ru"
-            else "❌ Channel not found! Check the @username."
+        await message.reply_text(
+            "❌ Bot bu kanalga kira olmadi. Admin sifatida qo'shilganini tekshiring." if lang == "uz"
+            else "❌ Бот не может получить доступ. Убедитесь, что бот — админ." if lang == "ru"
+            else "❌ Bot can't access this channel. Make sure it's an admin."
         )
         return
 
     # Store channel info
     context.user_data["jf_awaiting_channel"] = False
-    context.user_data["jf_channel_id"] = chat.id
-    context.user_data["jf_channel_title"] = chat.title
+    context.user_data["jf_channel_id"] = channel_id
+    context.user_data["jf_channel_title"] = channel_title
 
     # Show mode selection buttons
     texts = {
-        "uz": f"✅ <b>{chat.title}</b> topildi!\n\nRejimni tanlang:",
-        "ru": f"✅ <b>{chat.title}</b> найден!\n\nВыберите режим:",
-        "en": f"✅ <b>{chat.title}</b> found!\n\nChoose mode:",
+        "uz": f"✅ <b>{channel_title}</b> topildi!\n\nRejimni tanlang:",
+        "ru": f"✅ <b>{channel_title}</b> найден!\n\nВыберите режим:",
+        "en": f"✅ <b>{channel_title}</b> found!\n\nChoose mode:",
     }
 
     keyboard = InlineKeyboardMarkup([
@@ -387,7 +437,7 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [InlineKeyboardButton("❌ O'chirish", callback_data="jf_mode_off")],
     ])
 
-    await update.message.reply_text(texts.get(lang, texts["uz"]), reply_markup=keyboard, parse_mode="HTML")
+    await message.reply_text(texts.get(lang, texts["uz"]), reply_markup=keyboard, parse_mode="HTML")
 
 
 async def jf_mode_selected_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -458,7 +508,7 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
     IMPORTANT: This handler only processes messages when user_data has 
     'awaiting_captcha' = True. Otherwise it does NOTHING (passes through).
     """
-    # Join filter: check if awaiting channel @username
+    # Join filter: check if awaiting channel (forwarded message or text)
     if context.user_data.get("jf_awaiting_channel"):
         await jf_receive_channel(update, context)
         return
@@ -584,5 +634,12 @@ def get_common_handlers() -> list:
 
 
 def get_captcha_answer_handler():
-    """Return the CAPTCHA answer handler separately — must be added in a LATER group."""
-    return MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer)
+    """Return the CAPTCHA answer handler separately — must be added in a LATER group.
+    
+    Catches TEXT messages (for captcha answers) AND forwarded messages
+    (for join filter channel identification via forward).
+    """
+    return MessageHandler(
+        (filters.TEXT | filters.FORWARDED) & ~filters.COMMAND,
+        handle_captcha_answer
+    )
