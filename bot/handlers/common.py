@@ -71,11 +71,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Recorded with verify_subscription=False → pure DB, no Telegram call here.
     if context.args:
         payload = context.args[0]
-        # Handle /start verify (from captcha prompt button)
-        # The captcha ConversationHandler catches this as an entry point,
-        # but if it somehow reaches here, just prompt /verify
-        if payload == "verify":
-            return
 
         referrer_id, giveaway_id = parse_referral_payload(payload)
         if referrer_id:
@@ -90,20 +85,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             except Exception as e:
                 logger.warning("Referral processing failed for %s: %s", user_id, e)
 
-    # If user is not CAPTCHA-verified, prompt them
+    # If user is not CAPTCHA-verified, send CAPTCHA directly (no button needed)
     if not await is_user_verified(user_id):
-        bot_username = context.bot.username
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton(
-                "🔒 Tekshiruvdan o'tish (CAPTCHA)",
-                url=f"https://t.me/{bot_username}?start=verify"
-            )]
-        ])
+        captcha = None
+        from bot.utils.captcha import generate_captcha
+        captcha = generate_captcha()
+        context.user_data["captcha_answer"] = captcha.answer
+        context.user_data["captcha_attempts"] = 0
+        context.user_data["awaiting_captcha"] = True
+
         await update.message.reply_text(
-            "🔒 <b>Qatnashish uchun tekshiruv kerak</b>\n\n"
-            "Botlardan himoyalanish uchun oddiy matematik misolni yeching.\n"
-            "Bu bir marta — keyin barcha funksiyalar ochiq bo'ladi.",
-            reply_markup=keyboard,
+            f"🔒 <b>Tekshiruv (CAPTCHA)</b>\n\n"
+            f"Botlardan himoyalanish uchun oddiy misolni yeching.\n"
+            f"Bu bir marta — keyin barcha funksiyalar ochiq.\n\n"
+            f"🧮 <code>{captcha.question}</code>\n\n"
+            f"Javobni raqam bilan yuboring:",
             parse_mode="HTML",
         )
 
@@ -267,6 +263,102 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await joinfilter_command(update, context)
 
 
+async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle CAPTCHA answer from /start flow (standalone, no ConversationHandler)."""
+    if not context.user_data.get("awaiting_captcha"):
+        return  # Not waiting for captcha — ignore
+
+    from bot.utils.captcha import generate_captcha, verify_captcha
+    from bot.handlers.captcha_handler import mark_verified
+
+    user_id = update.effective_user.id
+    user_answer = update.message.text.strip()
+    correct_answer = context.user_data.get("captcha_answer")
+    attempts = context.user_data.get("captcha_attempts", 0)
+
+    if correct_answer is None:
+        context.user_data.pop("awaiting_captcha", None)
+        return
+
+    if verify_captcha(user_answer, correct_answer):
+        # Correct! Ask gender
+        context.user_data.pop("captcha_answer", None)
+        context.user_data.pop("captcha_attempts", None)
+        context.user_data["awaiting_captcha"] = False
+        context.user_data["awaiting_gender"] = True
+
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("👨 Erkak / Male", callback_data="gender_male"),
+                InlineKeyboardButton("👩 Ayol / Female", callback_data="gender_female"),
+            ]
+        ])
+        await update.message.reply_text(
+            "✅ <b>To'g'ri!</b>\n\n"
+            "Oxirgi savol — jinsingizni tanlang:",
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+    else:
+        attempts += 1
+        context.user_data["captcha_attempts"] = attempts
+        if attempts >= 3:
+            captcha = generate_captcha()
+            context.user_data["captcha_answer"] = captcha.answer
+            context.user_data["captcha_attempts"] = 0
+            await update.message.reply_text(
+                f"❌ 3 ta noto'g'ri javob. Yangi misol:\n\n"
+                f"🧮 <code>{captcha.question}</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Noto'g'ri. Yana urinib ko'ring ({3 - attempts} qoldi):",
+            )
+
+
+async def handle_gender_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle gender selection from /start captcha flow."""
+    query = update.callback_query
+    if not context.user_data.get("awaiting_gender"):
+        return
+
+    await query.answer()
+    user_id = query.from_user.id
+    gender = query.data.split("_")[1]
+
+    from bot.handlers.captcha_handler import mark_verified
+    await mark_verified(user_id, gender=gender)
+    context.user_data["awaiting_gender"] = False
+
+    gender_emoji = "👨" if gender == "male" else "👩"
+    lang = await get_user_lang(user_id)
+    await query.edit_message_text(
+        f"✅ <b>Tasdiqlandi!</b> {gender_emoji}\n\n"
+        "Barcha funksiyalar sizga ochiq!",
+        parse_mode="HTML",
+    )
+    # Send main menu
+    await context.bot.send_message(
+        user_id,
+        "Davom etish uchun quyidagi tugmalardan foydalaning:",
+        reply_markup=get_main_menu_keyboard(lang),
+    )
+
+    # Auto-approve any pending join requests
+    pending = context.bot_data.get("pending_joins", {}).pop(user_id, None)
+    if pending:
+        try:
+            await context.bot.approve_chat_join_request(
+                chat_id=pending["chat_id"], user_id=user_id,
+            )
+            await context.bot.send_message(
+                user_id, "✅ Kanalga qo'shilish so'rovingiz qabul qilindi!",
+            )
+        except Exception:
+            pass
+
+
 def get_common_handlers() -> list:
     """Return common command handlers."""
     return [
@@ -285,4 +377,8 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
         MessageHandler(filters.Regex(r"^(🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
         MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
+        # Gender callback from /start captcha flow
+        CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
+        # Captcha answer handler (must be last — catches any text when awaiting)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_captcha_answer),
     ]

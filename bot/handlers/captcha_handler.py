@@ -241,12 +241,35 @@ async def start_verify_entry(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 
+async def captcha_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the 'start_captcha' inline button — tells user to type /verify."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+
+    if await is_user_verified(user_id):
+        await query.edit_message_text("✅ Siz allaqachon tasdiqlangansiz!")
+        return
+
+    await query.edit_message_text(
+        "🔒 <b>Tekshiruvni boshlash uchun quyidagini yozing:</b>\n\n"
+        "/verify",
+        parse_mode="HTML",
+    )
+
+
 class _VerifyStartFilter(filters.MessageFilter):
     """Custom filter that matches /start with 'verify' argument."""
     def filter(self, message) -> bool:
         if not message.text:
             return False
         return message.text.strip() == "/start verify" or message.text.strip().startswith("/start verify")
+
+
+class _CaptchaAnswerFilter(filters.MessageFilter):
+    """Filter that matches messages when user has an active CAPTCHA challenge."""
+    def filter(self, message) -> bool:
+        return False  # We can't check user_data from a filter — use ConversationHandler instead
 
 
 # ─── Handler Registration ────────────────────────────────────────────────────────
@@ -270,4 +293,7 @@ def get_captcha_handlers() -> list:
         fallbacks=[CommandHandler("cancel", cancel_captcha)],
     )
 
-    return [captcha_conv]
+    return [
+        captcha_conv,
+        CallbackQueryHandler(captcha_button_callback, pattern=r"^start_captcha$"),
+    ]
