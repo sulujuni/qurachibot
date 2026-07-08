@@ -487,7 +487,12 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif hasattr(origin, 'sender_chat') and origin.sender_chat:
             channel_id = origin.sender_chat.id
             channel_title = origin.sender_chat.title
-    # Method 3: Text — @username or numeric ID (fallback)
+    # Method 3: sender_chat (when channel post is forwarded)
+    elif hasattr(message, 'sender_chat') and message.sender_chat:
+        channel_id = message.sender_chat.id
+        channel_title = message.sender_chat.title
+    # Method 4: forward_from (user forwarded from another user/bot — not useful)
+    # Method 5: Text — @username or numeric ID (fallback)
     elif message.text:
         text = message.text.strip()
         if text.startswith("@"):
@@ -506,13 +511,26 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 pass
 
     if not channel_id:
+        # Debug info to help identify the issue
+        debug_info = []
+        if message.forward_from_chat:
+            debug_info.append(f"forward_from_chat: {message.forward_from_chat}")
+        if hasattr(message, 'forward_origin') and message.forward_origin:
+            debug_info.append(f"forward_origin: {message.forward_origin}")
+        if hasattr(message, 'sender_chat') and message.sender_chat:
+            debug_info.append(f"sender_chat: {message.sender_chat}")
+        if message.forward_date:
+            debug_info.append("has forward_date (is forwarded)")
+
+        hint = "\n".join(debug_info) if debug_info else "Xabar forward qilinmagan"
+
         await message.reply_text(
-            "❌ Kanal aniqlanmadi.\n\n"
-            "📌 Kanaldan bitta xabarni shu yerga <b>ulashing</b>." if lang == "uz"
-            else "❌ Канал не определён.\n\n"
-            "📌 <b>Перешлите</b> сообщение из канала сюда." if lang == "ru"
-            else "❌ Channel not detected.\n\n"
-            "📌 <b>Forward</b> a message from your channel here.",
+            f"❌ Kanal aniqlanmadi.\n\n"
+            f"📌 Kanaldan bitta xabarni shu yerga <b>ulashing</b> (forward).\n\n"
+            f"<i>Debug: {hint}</i>" if lang == "uz"
+            else f"❌ Channel not detected.\n\n"
+            f"📌 <b>Forward</b> a message from your channel here.\n\n"
+            f"<i>Debug: {hint}</i>",
             parse_mode="HTML",
         )
         return
@@ -628,6 +646,10 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
     """
     # Join filter: check if awaiting channel (forwarded message or text)
     if context.user_data.get("jf_awaiting_channel"):
+        logger.info("JF: Received message while awaiting channel. forward_from_chat=%s, forward_origin=%s, text=%s",
+                    getattr(update.message, 'forward_from_chat', None),
+                    getattr(update.message, 'forward_origin', None),
+                    getattr(update.message, 'text', '')[:50] if update.message else '')
         await jf_receive_channel(update, context)
         return
 
