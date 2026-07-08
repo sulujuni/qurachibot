@@ -1,12 +1,12 @@
 {
-  "welcome": "🎉 <b>Welcome to the Giveaway & Contest Bot!</b>\n\nI help you organize giveaways and contests in your Telegram chats.\n\n📌 <b>Quick Start:</b>\n• /newgiveaway — Create a random-draw giveaway\n• /newcontest — Create a contest with submissions & voting\n• /lang — Change language\n\nUse /help to see all available commands.",
-  "help": "📖 <b>All Commands:</b>\n\n<b>🎉 Giveaways:</b>\n/newgiveaway — Create a new giveaway\n/draw [id] — Draw winners for a giveaway\n/mygiveaways — List your giveaways\n/cancelgiveaway [id] — Cancel a giveaway\n\n<b>👥 Group & Channel Giveaways:</b>\n/groupgiveaway — Comment-to-enter giveaway (in a group)\n/channelgiveaway — Giveaway for a channel\n/groupdraw [id] — Draw group giveaway winners\n/groupentries [id] — View entries\n/grouppick [id] [n] — Pick a specific entry as winner\n/cancelgroupgiveaway [id] — Cancel it\n\n<b>🏅 Contests:</b>\n/newcontest — Create a new contest\n/submit [id] [text] — Submit an entry\n/vote [submission_id] — Vote for a submission\n/submissions [id] — View contest submissions\n/startvoting [id] — Close submissions, start voting\n/endcontest [id] — End contest & announce winners\n/mycontests — List your contests\n/cancelcontest [id] — Cancel a contest\n\n<b>🎁 Rewards:</b>\n/referral [id] — Get your referral link & stats\n/points — View your loyalty points\n\n<b>⚙️ Settings:</b>\n/lang — Change language\n/help — This help message",
+  "welcome": "🎉 <b>Welcome to the Giveaway & Contest Bot!</b>\n\nI help you organize giveaways and contests in your Telegram chats.\n\n📌 <b>What you can do:</b>\n🎲 Create giveaways (random winner)\n🏅 Create contests (submissions + voting)\n🚪 Auto-accept channel join requests\n👥 Invite friends and earn points\n\n👇 Use the buttons below!",
+  "help": "📖 <b>Qurachi Bot — Help</b>\n\n<b>🎲 Giveaway:</b>\nCreate a prize draw — winner picked randomly\n\n<b>🏅 Contest:</b>\nUsers submit entries, others vote for the best\n\n<b>🚪 Join Requests:</b>\nAuto-accept channel join requests\n\n<b>👥 Referrals:</b>\nInvite friends and earn loyalty points\n\n<b>🏆 Leaderboard:</b>\nTop most active users\n\n<b>⚙️ Settings:</b>\nLanguage, notifications\n\n👇 Use the buttons below!",
   "ref_info": "👥 <b>Your Referral Link{gw_text}</b>\n\n🔗 <code>{link}</code>\n\nShare this link with friends! When they start the bot through your link and subscribe:\n  • You earn <b>+{points} loyalty points</b>\n  • You get <b>+1 bonus entry</b> in giveaways\n\n⚠️ Only real accounts that join the required channel(s) count.\n\n📊 <b>Your referral stats:</b>\n  Verified referrals: {count}\n  Points earned: {earned}",
   "ref_pending": "⏳ Thanks for joining! Your referral will count once you subscribe to the required channel(s) and join a giveaway.",
   "lang_select": "🌐 <b>Choose your language:</b>",
   "lang_set": "✅ Language set to <b>{lang_name}</b>",
 
-  "gw_create_title": "🎉 <b>Create a New Giveaway</b>\n\nLet's set up your giveaway! First, what's the <b>title</b>?\n\nSend /cancel to abort.",
+  "gw_create_title": "🎉 <b>Create a New Giveaway</b>\n\nLet's set it up! First, enter the <b>title</b>.\n\n❌ To cancel, type \"Cancel\".",
   "gw_create_description": "📝 Great! Now send me a <b>description</b> for the giveaway.\n(What are participants competing for? Any rules?)\n\nOr send /skip to skip the description.",
   "gw_create_prize": "🎁 What's the <b>prize</b>?\n(e.g., '$50 Gift Card', 'Premium subscription', 'Custom artwork')",
   "gw_create_winners": "🏆 How many <b>winners</b> should be drawn?\n(Send a number, e.g., 1, 3, 5)",
@@ -30,7 +30,7 @@
   "gw_not_active": "❌ This giveaway is no longer active.",
   "gw_no_participants": "❌ No participants yet! Can't draw winners.",
   "gw_results": "🎊 <b>GIVEAWAY RESULTS: {title}</b>\n\n🎁 Prize: {prize}\n👤 Total participants: {total}\n\n<b>Winners:</b>\n{winners}\n\nCongratulations! 🎉",
-  "gw_my_list_empty": "You haven't created any giveaways yet.\nUse /newgiveaway to create one!",
+  "gw_my_list_empty": "You haven't created any giveaways yet.\n\n👇 Tap the \"🎲 Create Giveaway\" button below!",
   "gw_my_list_header": "📋 <b>Your Giveaways (last 10):</b>\n\n",
   "gw_cancel_usage": "Usage: /cancelgiveaway <giveaway_id>",
   "gw_cancel_only_creator": "❌ Only the creator can cancel this giveaway.",
@@ -47,7 +47,7 @@
   "dur_7d": "7 days",
   "dur_none": "No time limit",
 
-  "ct_create_title": "🏅 <b>Create a New Contest</b>\n\nLet's set up your contest! First, what's the <b>title</b>?\n\nSend /cancel to abort.",
+  "ct_create_title": "🏅 <b>Create a New Contest</b>\n\nLet's set it up! First, enter the <b>title</b>.\n\n❌ To cancel, type \"Cancel\".",
   "ct_create_description": "📝 Now give a <b>description</b> for the contest.\n(What should participants do? Any rules or criteria?)\n\nOr send /skip to skip.",
   "ct_create_type": "📂 What <b>type</b> of submissions should the contest accept?",
   "ct_create_prize": "🎁 What's the <b>prize</b> for the winner(s)?\n\nOr send /skip if there's no prize.",
@@ -91,7 +91,7 @@
   "ct_cancel_only_creator": "❌ Only the creator can cancel this contest.",
   "ct_cancel_already_done": "❌ This contest is already finished.",
   "ct_cancel_done": "❌ Contest <b>'{title}'</b> has been cancelled.",
-  "ct_my_list_empty": "You haven't created any contests yet.\nUse /newcontest to create one!",
+  "ct_my_list_empty": "You haven't created any contests yet.\n\n👇 Tap the \"🏅 Create Contest\" button below!",
   "ct_my_list_header": "📋 <b>Your Contests (last 10):</b>\n\n",
 
   "ct_type_text": "📝 Text",

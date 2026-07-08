@@ -170,7 +170,7 @@ async def gender_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         "• Yutuqli o'yinlarda qatnashish\n"
         "• Konkurslarda ishtirok etish\n"
         "• Kanallarga qo'shilish\n\n"
-        "Davom etish uchun /help ni bosing.",
+        "👇 Pastdagi tugmalardan foydalaning!",
         parse_mode="HTML",
     )
 

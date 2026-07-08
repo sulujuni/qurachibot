@@ -1,12 +1,12 @@
 {
-  "welcome": "🎉 <b>Yutuqli o'yin va konkurs botiga xush kelibsiz!</b>\n\nMen sizga Telegram guruh va kanallaringizda yutuqli o'yinlar (sovg'a o'ynatish) va konkurslar tashkil qilishda yordam beraman.\n\n📌 <b>Tezkor boshlash:</b>\n• /newgiveaway — Yutuqli o'yin yaratish (sovg'a o'ynatish)\n• /newcontest — Konkurs yaratish (ishtiroklar va ovoz berish bilan)\n• /lang — Tilni o'zgartirish\n\nBarcha buyruqlar ro'yxati uchun /help ni bosing.",
-  "help": "📖 <b>Barcha buyruqlar:</b>\n\n<b>🎉 Yutuqli o'yinlar (sovg'a o'ynatish):</b>\n/newgiveaway — Yangi yutuqli o'yin yaratish\n/draw [id] — G'oliblarni aniqlash (qur'a tashlash)\n/mygiveaways — Mening yutuqli o'yinlarim\n/cancelgiveaway [id] — Yutuqli o'yinni bekor qilish\n\n<b>👥 Guruh va kanal o'yinlari:</b>\n/groupgiveaway — Guruhda izohli yutuqli o'yin\n/channelgiveaway — Kanal uchun yutuqli o'yin\n/groupdraw [id] — G'oliblarni aniqlash\n/groupentries [id] — Ishtiroklarni ko'rish\n/grouppick [id] [n] — Muayyan ishtirokni g'olib qilish\n/cancelgroupgiveaway [id] — Bekor qilish\n\n<b>🏅 Konkurslar:</b>\n/newcontest — Yangi konkurs yaratish\n/submit [id] [matn] — Ishtirok yuborish\n/vote [ishtirok_id] — Ishtirokka ovoz berish\n/submissions [id] — Ishtiroklarni ko'rish\n/startvoting [id] — Ovoz berishni boshlash\n/endcontest [id] — Konkursni yakunlash\n/mycontests — Mening konkurslarim\n/cancelcontest [id] — Konkursni bekor qilish\n\n<b>🎁 Mukofotlar:</b>\n/referral [id] — Do'st taklif qilish havolangiz\n/points — Ballaringiz\n\n<b>⚙️ Sozlamalar:</b>\n/lang — Tilni o'zgartirish\n/help — Ushbu yordam",
+  "welcome": "🎉 <b>Yutuqli o'yin va konkurs botiga xush kelibsiz!</b>\n\nMen sizga Telegram guruh va kanallaringizda yutuqli o'yinlar (sovg'a o'ynatish) va konkurslar tashkil qilishda yordam beraman.\n\n📌 <b>Nima qila olasiz:</b>\n🎲 Yutuqli o'yin yaratish\n🏅 Konkurs tashkil qilish\n🚪 Kanalga qo'shilish so'rovlarini boshqarish\n👥 Do'stlaringizni taklif qilish\n\n👇 Pastdagi tugmalardan foydalaning!",
+  "help": "📖 <b>Qurachi Bot — Yordam</b>\n\n<b>🎲 Yutuqli o'yin:</b>\nSovg'a o'ynatish — g'olib tasodifiy tanlanadi\n\n<b>🏅 Konkurs:</b>\nIshtirokchilar ariza yuboradi, boshqalar ovoz beradi\n\n<b>🚪 So'rovlarni boshqarish:</b>\nKanalga qo'shilish so'rovlarini avtomatik qabul qilish\n\n<b>👥 Do'st taklif:</b>\nDo'stlaringizni taklif qilib ball yig'ing\n\n<b>🏆 Reyting:</b>\nEng faol foydalanuvchilar reytingi\n\n<b>⚙️ Sozlamalar:</b>\nTil o'zgartirish, bildirishnomalar\n\n👇 Pastdagi tugmalardan foydalaning!",
   "ref_info": "👥 <b>Sizning taklif havolangiz{gw_text}</b>\n\n🔗 <code>{link}</code>\n\nHavolani do'stlaringizga ulashing! Ular havola orqali botni ishga tushirib, kanal(lar)ga obuna bo'lsa:\n  • Siz <b>+{points} ball</b> olasiz\n  • Yutuqli o'yinlarda <b>+1 qo'shimcha ishtirok</b> olasiz\n\n⚠️ Faqat majburiy kanallarga obuna bo'lgan haqiqiy (bot bo'lmagan) foydalanuvchilar hisobga olinadi.\n\n📊 <b>Statistikangiz:</b>\n  Tasdiqlangan takliflar: {count}\n  Yig'ilgan ballar: {earned}",
   "ref_pending": "⏳ Qo'shilganingiz uchun rahmat! Taklifingiz siz majburiy kanallarga obuna bo'lib, yutuqli o'yinda qatnashganingizdan keyin hisobga olinadi.",
   "lang_select": "🌐 <b>Tilni tanlang:</b>",
   "lang_set": "✅ Til o'rnatildi: <b>{lang_name}</b>",
 
-  "gw_create_title": "🎉 <b>Yangi yutuqli o'yin yaratish</b>\n\nKeling, sozlaymiz! Avvalo, o'yin <b>nomini</b> kiriting.\n\nBekor qilish uchun /cancel yuboring.",
+  "gw_create_title": "🎉 <b>Yangi yutuqli o'yin yaratish</b>\n\nKeling, sozlaymiz! Avvalo, o'yin <b>nomini</b> kiriting.\n\n❌ Bekor qilish uchun \"Bekor\" deb yozing.",
   "gw_create_description": "📝 Ajoyib! Endi yutuqli o'yin uchun <b>tavsif</b> yozing.\n(Nima o'ynatilyapti? Qanday qoidalar bor?)\n\nO'tkazib yuborish uchun /skip yuboring.",
   "gw_create_prize": "🎁 <b>Sovg'a</b> nima?\n(masalan, '50$ sovg'a kartasi', 'Premium obuna', 'Maxsus rasm')",
   "gw_create_winners": "🏆 Nechta <b>g'olib</b> aniqlanadi?\n(Raqam yuboring, masalan, 1, 3, 5)",
@@ -30,7 +30,7 @@
   "gw_not_active": "❌ Bu yutuqli o'yin endi faol emas.",
   "gw_no_participants": "❌ Hali ishtirokchilar yo'q! G'oliblarni aniqlab bo'lmaydi.",
   "gw_results": "🎊 <b>NATIJALAR: {title}</b>\n\n🎁 Sovg'a: {prize}\n👤 Jami ishtirokchilar: {total}\n\n<b>G'oliblar:</b>\n{winners}\n\nTabriklaymiz! 🎉",
-  "gw_my_list_empty": "Siz hali yutuqli o'yin yaratmagansiz.\nYaratish uchun /newgiveaway dan foydalaning!",
+  "gw_my_list_empty": "Siz hali yutuqli o'yin yaratmagansiz.\n\n👇 Pastdagi \"🎲 Yutuqli o'yin yaratish\" tugmasini bosing!",
   "gw_my_list_header": "📋 <b>Sizning yutuqli o'yinlaringiz (oxirgi 10):</b>\n\n",
   "gw_cancel_usage": "Foydalanish: /cancelgiveaway <o'yin_id>",
   "gw_cancel_only_creator": "❌ Faqat yaratuvchi bu o'yinni bekor qilishi mumkin.",
@@ -47,7 +47,7 @@
   "dur_7d": "7 kun",
   "dur_none": "Chegarasiz",
 
-  "ct_create_title": "🏅 <b>Yangi konkurs yaratish</b>\n\nKeling, sozlaymiz! Avvalo, konkurs <b>nomini</b> kiriting.\n\nBekor qilish uchun /cancel yuboring.",
+  "ct_create_title": "🏅 <b>Yangi konkurs yaratish</b>\n\nKeling, sozlaymiz! Avvalo, konkurs <b>nomini</b> kiriting.\n\n❌ Bekor qilish uchun \"Bekor\" deb yozing.",
   "ct_create_description": "📝 Endi konkurs uchun <b>tavsif</b> yozing.\n(Ishtirokchilar nima qilishi kerak? Qanday qoidalar bor?)\n\nO'tkazib yuborish uchun /skip yuboring.",
   "ct_create_type": "📂 Konkurs qanday <b>turdagi</b> ishtiroklarni qabul qiladi?",
   "ct_create_prize": "🎁 G'olib(lar) uchun <b>sovg'a</b> nima?\n\nSovg'a bo'lmasa /skip yuboring.",
@@ -91,7 +91,7 @@
   "ct_cancel_only_creator": "❌ Faqat yaratuvchi bu konkursni bekor qila oladi.",
   "ct_cancel_already_done": "❌ Bu konkurs allaqachon yakunlangan.",
   "ct_cancel_done": "❌ <b>'{title}'</b> konkursi bekor qilindi.",
-  "ct_my_list_empty": "Siz hali konkurs yaratmagansiz.\nYaratish uchun /newcontest dan foydalaning!",
+  "ct_my_list_empty": "Siz hali konkurs yaratmagansiz.\n\n👇 Pastdagi \"🏅 Konkurs yaratish\" tugmasini bosing!",
   "ct_my_list_header": "📋 <b>Sizning konkurslaringiz (oxirgi 10):</b>\n\n",
 
   "ct_type_text": "📝 Matn",
