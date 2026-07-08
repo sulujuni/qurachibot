@@ -60,11 +60,40 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     user_id = user.id
 
-    # Always respond first so users get instant feedback, even under heavy load.
-    text = await t("welcome", user_id)
+    # Get user's language (or default)
     lang = await get_user_lang(user_id)
+
+    # Build welcome message with inline buttons
+    text = await t("welcome", user_id)
+
+    # Inline buttons: language selector + Mini App (if configured)
+    inline_buttons = []
+
+    # Language buttons row
+    lang_buttons = []
+    for code, name in LANG_NAMES.items():
+        prefix = "✅ " if code == lang else ""
+        lang_buttons.append(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"setlang_{code}"))
+    inline_buttons.append(lang_buttons)
+
+    # Mini App button (if WEB_URL is set)
+    web_url = settings.WEB_URL
+    if web_url:
+        from telegram import WebAppInfo
+        miniapp_url = f"{web_url.rstrip('/')}/miniapp"
+        inline_buttons.append([
+            InlineKeyboardButton("🎲 Mini App", web_app=WebAppInfo(url=miniapp_url))
+        ])
+
+    inline_keyboard = InlineKeyboardMarkup(inline_buttons)
+
+    # Send welcome with BOTH reply keyboard (persistent buttons) and inline buttons
     await update.message.reply_text(
         text, parse_mode="HTML", reply_markup=get_main_menu_keyboard(lang)
+    )
+    await update.message.reply_text(
+        "🌐 " + ("Tilni tanlang:" if lang == "uz" else "Выберите язык:" if lang == "ru" else "Choose language:"),
+        reply_markup=inline_keyboard,
     )
 
     # Referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
@@ -138,17 +167,33 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await query.answer()
 
     lang_name = LANG_NAMES.get(lang_code, lang_code)
-    text = get_text("lang_set", lang=lang_code, lang_name=lang_name)
-    await query.edit_message_text(text, parse_mode="HTML")
 
-    # Update the reply keyboard to match new language
-    try:
-        await context.bot.send_message(
-            user_id, "✅",
-            reply_markup=get_main_menu_keyboard(lang_code),
-        )
-    except Exception:
-        pass
+    # Update the inline keyboard to show current selection
+    lang_buttons = []
+    for code, name in LANG_NAMES.items():
+        prefix = "✅ " if code == lang_code else ""
+        lang_buttons.append(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"setlang_{code}"))
+
+    inline_buttons = [lang_buttons]
+    web_url = settings.WEB_URL
+    if web_url:
+        from telegram import WebAppInfo
+        miniapp_url = f"{web_url.rstrip('/')}/miniapp"
+        inline_buttons.append([
+            InlineKeyboardButton("🎲 Mini App", web_app=WebAppInfo(url=miniapp_url))
+        ])
+
+    await query.edit_message_text(
+        "🌐 " + ("Tilni tanlang:" if lang_code == "uz" else "Выберите язык:" if lang_code == "ru" else "Choose language:"),
+        reply_markup=InlineKeyboardMarkup(inline_buttons),
+    )
+
+    # Send the welcome message again in the new language + update reply keyboard
+    text = get_text("welcome", lang=lang_code)
+    await context.bot.send_message(
+        user_id, text, parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard(lang_code),
+    )
 
 
 async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
