@@ -244,6 +244,17 @@ const T = {
         c_vote: 'Ovoz', c_voted: 'Ovoz berdingiz', you_label: 'siz',
         c_st_accepting: '📤 Ishtirok qabul qilmoqda', c_st_voting: '🗳 Ovoz berish', c_st_completed: '✅ Yakunlangan', c_st_cancelled: '❌ Bekor qilingan',
         required: 'majburiy',
+        feedback_title: "Takliflar va shikoyatlar",
+        feedback_desc: "Fikr, taklif yoki shikoyatingizni yuboring. Biz albatta ko'rib chiqamiz.",
+        fb_suggestion: "💡 Taklif", fb_complaint: "😤 Shikoyat", fb_bug: "🐛 Xatolik",
+        fb_placeholder: "Fikringizni yozing...",
+        fb_send: "Yuborish",
+        fb_sent: "✅ Rahmat! Fikringiz qabul qilindi.",
+        users_title: "Foydalanuvchilar",
+        us_started: "Botni boshlagan", us_participants: "O'yinda qatnashgan",
+        us_verified: "CAPTCHA o'tgan", us_today: "Bugungi faollar",
+        dbinfo_title: "Ma'lumotlar bazasi",
+        db_size: "Hajmi", db_table: "Jadval", db_rows: "Qatorlar",
     },
     ru: {
         home: 'Главная', games: 'Мои игры', leaders: 'Рейтинг', create: 'Создать', profile: 'Профиль', admin: 'Админ',
@@ -298,6 +309,17 @@ const T = {
         c_vote: 'Голос', c_voted: 'Вы проголосовали', you_label: 'вы',
         c_st_accepting: '📤 Приём заявок', c_st_voting: '🗳 Голосование', c_st_completed: '✅ Завершён', c_st_cancelled: '❌ Отменён',
         required: 'обязательно',
+        feedback_title: "Отзывы и жалобы",
+        feedback_desc: "Отправьте ваше мнение, предложение или жалобу.",
+        fb_suggestion: "💡 Предложение", fb_complaint: "😤 Жалоба", fb_bug: "🐛 Баг",
+        fb_placeholder: "Напишите ваш отзыв...",
+        fb_send: "Отправить",
+        fb_sent: "✅ Спасибо! Ваш отзыв принят.",
+        users_title: "Пользователи",
+        us_started: "Запустили бота", us_participants: "Участвовали",
+        us_verified: "Прошли CAPTCHA", us_today: "Активны сегодня",
+        dbinfo_title: "База данных",
+        db_size: "Размер", db_table: "Таблица", db_rows: "Строки",
     },
     en: {
         home: 'Home', games: 'My Games', leaders: 'Leaderboard', create: 'Create', profile: 'Profile', admin: 'Admin',
@@ -352,6 +374,17 @@ const T = {
         c_vote: 'Vote', c_voted: 'You voted', you_label: 'you',
         c_st_accepting: '📤 Accepting entries', c_st_voting: '🗳 Voting', c_st_completed: '✅ Completed', c_st_cancelled: '❌ Cancelled',
         required: 'required',
+        feedback_title: "Feedback & Complaints",
+        feedback_desc: "Send your suggestions, complaints, or bug reports.",
+        fb_suggestion: "💡 Suggestion", fb_complaint: "😤 Complaint", fb_bug: "🐛 Bug",
+        fb_placeholder: "Write your feedback...",
+        fb_send: "Send",
+        fb_sent: "✅ Thank you! Your feedback was received.",
+        users_title: "Users",
+        us_started: "Started bot", us_participants: "Participated",
+        us_verified: "Passed CAPTCHA", us_today: "Active today",
+        dbinfo_title: "Database Info",
+        db_size: "Size", db_table: "Table", db_rows: "Rows",
     },
 };
 
@@ -913,6 +946,54 @@ async function renderAdmin() {
         });
     }
     html += '</div>';
+
+    // User counter
+    const usersData = await api('/admin/users-count');
+    html += `<div class="card">
+        <div class="card-title">👥 ${t('users_title')}</div>
+        <div class="stats-row">
+            <div class="stat-box"><div class="stat-val">${usersData.total_started||0}</div><div class="stat-lbl">${t('us_started')}</div></div>
+            <div class="stat-box"><div class="stat-val">${usersData.total_participants||0}</div><div class="stat-lbl">${t('us_participants')}</div></div>
+            <div class="stat-box"><div class="stat-val">${usersData.verified||0}</div><div class="stat-lbl">${t('us_verified')}</div></div>
+            <div class="stat-box"><div class="stat-val">${usersData.today_active||0}</div><div class="stat-lbl">${t('us_today')}</div></div>
+        </div>
+    </div>`;
+
+    // DB Info
+    const dbData = await api('/admin/dbinfo');
+    html += `<div class="card">
+        <div class="card-title">🗄 ${t('dbinfo_title')}</div>
+        <div style="font-size:13px;margin-bottom:10px;"><b>${t('db_size')}:</b> ${dbData.db_size || '?'}</div>
+        <div style="max-height:200px;overflow-y:auto;">`;
+    if (dbData.row_counts) {
+        Object.entries(dbData.row_counts).forEach(([table, rows]) => {
+            html += `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;">
+                <span>${table}</span><span style="font-weight:700;">${rows}</span>
+            </div>`;
+        });
+    }
+    html += `</div></div>`;
+
+    // Feedback viewer (admin)
+    const feedbackData = await api('/admin/feedback');
+    html += `<div class="card">
+        <div class="card-title">📝 ${t('feedback_title')}</div>`;
+    if (feedbackData.length) {
+        feedbackData.slice(0, 20).forEach(fb => {
+            const typeIcon = {suggestion:'💡', complaint:'😤', bug:'🐛'}[fb.type] || '📝';
+            html += `<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;">
+                <div style="display:flex;justify-content:space-between;">
+                    <span>${typeIcon} <b>${fb.type}</b></span>
+                    <span style="color:var(--text-hint);">${fb.date ? new Date(fb.date).toLocaleDateString() : ''}</span>
+                </div>
+                <div style="margin-top:4px;color:var(--text);">${(fb.text||'').substring(0, 200)}</div>
+            </div>`;
+        });
+    } else {
+        html += `<p style="font-size:12px;color:var(--text-hint);">Hali fikrlar yo'q</p>`;
+    }
+    html += `</div>`;
+
     el.innerHTML = html;
 }
 
@@ -1029,6 +1110,21 @@ async function renderProfile() {
                 ${alertActive ? '✅ ' + t('alerts_on') : '⭕ ' + t('alerts_off')}
             </button>
         </div>
+    </div>`;
+
+    // Feedback / Suggestions & Complaints (for ALL users)
+    html += `<div class="card">
+        <div class="card-title">📝 ${t('feedback_title')}</div>
+        <p style="font-size:12px;color:var(--text-hint);margin-bottom:10px;">${t('feedback_desc')}</p>
+        <div class="chip-row" id="fbTypeChips">
+            <span class="chip selected" id="fb_suggestion" onclick="setFbType('suggestion')">${t('fb_suggestion')}</span>
+            <span class="chip" id="fb_complaint" onclick="setFbType('complaint')">${t('fb_complaint')}</span>
+            <span class="chip" id="fb_bug" onclick="setFbType('bug')">${t('fb_bug')}</span>
+        </div>
+        <div class="form-group">
+            <textarea class="form-textarea" id="fbText" placeholder="${t('fb_placeholder')}" style="min-height:70px;"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="submitFeedback()">${t('fb_send')}</button>
     </div>`;
 
     // Join filters — available to ALL users (any channel admin can configure)
@@ -1179,6 +1275,27 @@ async function addJoinFilter() {
     showToast('✅ Filter saqlandi!');
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     renderProfile();
+}
+
+// ─── Feedback functions ─────────────────────────────────────────
+let feedbackType = 'suggestion';
+
+function setFbType(type) {
+    feedbackType = type;
+    document.querySelectorAll('#fbTypeChips .chip').forEach(el => {
+        el.classList.toggle('selected', el.id === `fb_${type}`);
+    });
+}
+
+async function submitFeedback() {
+    const text = document.getElementById('fbText').value.trim();
+    if (!text) { showToast('❌', 'error'); return; }
+
+    const res = await api('/feedback', 'POST', {text, type: feedbackType});
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(t('fb_sent'));
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    document.getElementById('fbText').value = '';
 }
 
 async function changeFilterMode(chatId) {

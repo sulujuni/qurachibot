@@ -1254,3 +1254,187 @@ async def admin_broadcast(
 
     logger.info("Broadcast: sent=%d, failed=%d, target=%s, by user=%d", sent, failed, target, user["id"])
     return {"success": True, "sent": sent, "failed": failed, "total": len(user_ids)}
+
+
+
+# ─── Feedback / Suggestions & Complaints ─────────────────────────────────────
+
+
+@router.post("/feedback")
+async def miniapp_submit_feedback(request: Request, x_telegram_init_data: str | None = Header(None)):
+    """Submit feedback/suggestion/complaint from a user."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+    username = user.get("username")
+
+    body = await request.json()
+    text = body.get("text", "").strip()
+    feedback_type = body.get("type", "suggestion")  # suggestion, complaint, bug
+
+    if not text:
+        return {"error": "Matn kiritilishi shart"}
+    if len(text) > 2000:
+        return {"error": "Matn 2000 belgidan oshmasligi kerak"}
+
+    from bot.models.base import Base
+    from sqlalchemy import BigInteger, DateTime, Integer, String, Text, func as sqlfunc
+    from sqlalchemy.orm import Mapped, mapped_column
+
+    # Store feedback in a simple way — use ContentFlag model repurposed,
+    # or insert directly. Let's use a direct insert for simplicity.
+    async with async_session() as session:
+        # We'll store in content_flags table with content_type='feedback'
+        from bot.models.moderation import ContentFlag
+        flag = ContentFlag(
+            user_id=user_id,
+            content_type=f"feedback_{feedback_type}",
+            content_text=f"[{feedback_type}] @{username or user_id}: {text}",
+            reason=feedback_type,
+        )
+        session.add(flag)
+        await session.commit()
+
+    return {"success": True}
+
+
+@router.get("/admin/feedback")
+async def admin_get_feedback(x_telegram_init_data: str | None = Header(None)):
+    """Admin: get all feedback/suggestions/complaints."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from bot.models.moderation import ContentFlag
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(ContentFlag)
+            .where(ContentFlag.content_type.like("feedback_%"))
+            .order_by(ContentFlag.created_at.desc())
+            .limit(50)
+        )
+        items = result.scalars().all()
+
+    return [
+        {
+            "id": f.id,
+            "type": f.reason,
+            "text": f.content_text,
+            "user_id": f.user_id,
+            "date": f.created_at.isoformat() if f.created_at else None,
+            "resolved": f.resolved if hasattr(f, 'resolved') else False,
+        }
+        for f in items
+    ]
+
+
+# ─── User Counter + DB Info (admin) ─────────────────────────────────────────
+
+
+@router.get("/admin/users-count")
+async def admin_users_count(x_telegram_init_data: str | None = Header(None)):
+    """Admin: get total user count from different sources."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from bot.models.user_settings import UserSettings
+    from bot.models.loyalty import LoyaltyPoints
+
+    async with async_session() as session:
+        # Users who started the bot (user_settings table)
+        started = (await session.execute(select(func.count(UserSettings.id)))).scalar() or 0
+
+        # Users who joined any giveaway
+        participants = (await session.execute(
+            select(func.count(func.distinct(GiveawayParticipant.user_id)))
+        )).scalar() or 0
+
+        # Users with loyalty points
+        with_points = (await session.execute(select(func.count(LoyaltyPoints.id)))).scalar() or 0
+
+        # Verified users (passed CAPTCHA)
+        verified = (await session.execute(
+            select(func.count(UserSettings.id)).where(UserSettings.captcha_verified == True)
+        )).scalar() or 0
+
+        # Today's new users
+        from datetime import datetime, timedelta
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        # We approximate "today's users" by loyalty points created today
+        today_active = (await session.execute(
+            select(func.count(func.distinct(GiveawayParticipant.user_id)))
+            .where(GiveawayParticipant.joined_at >= today)
+        )).scalar() or 0
+
+    return {
+        "total_started": started,
+        "total_participants": participants,
+        "with_points": with_points,
+        "verified": verified,
+        "today_active": today_active,
+    }
+
+
+@router.get("/admin/dbinfo")
+async def admin_dbinfo(x_telegram_init_data: str | None = Header(None)):
+    """Admin: get database info (table sizes, total rows)."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    from sqlalchemy import text as sql_text
+
+    tables_info = []
+    async with async_session() as session:
+        # Get all table names and row counts
+        try:
+            result = await session.execute(sql_text("""
+                SELECT schemaname, tablename,
+                       pg_size_pretty(pg_total_relation_size(schemaname || '.' || tablename)) as size,
+                       (SELECT count(*) FROM information_schema.columns
+                        WHERE table_name = tablename AND table_schema = schemaname) as columns
+                FROM pg_tables
+                WHERE schemaname = 'public'
+                ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC
+            """))
+            for row in result:
+                tables_info.append({
+                    "table": row[1],
+                    "size": row[2],
+                    "columns": row[3],
+                })
+        except Exception:
+            pass
+
+        # Get row counts for key tables
+        key_tables = [
+            ("user_settings", "UserSettings"),
+            ("giveaways", "Giveaway"),
+            ("giveaway_participants", "GiveawayParticipant"),
+            ("contests", "Contest"),
+            ("group_giveaways", "GroupGiveaway"),
+            ("referrals", "Referral"),
+            ("loyalty_points", "LoyaltyPoints"),
+        ]
+        row_counts = {}
+        for table_name, _ in key_tables:
+            try:
+                result = await session.execute(sql_text(f"SELECT count(*) FROM {table_name}"))
+                row_counts[table_name] = result.scalar() or 0
+            except Exception:
+                row_counts[table_name] = -1
+
+        # DB size
+        db_size = "?"
+        try:
+            result = await session.execute(sql_text("SELECT pg_size_pretty(pg_database_size(current_database()))"))
+            db_size = result.scalar()
+        except Exception:
+            pass
+
+    return {
+        "db_size": db_size,
+        "tables": tables_info,
+        "row_counts": row_counts,
+    }
