@@ -271,10 +271,10 @@ async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "📌 <b>Qanday sozlash:</b>\n"
             "1. Pastdagi tugma orqali botni kanalga admin qiling\n"
             "2. \"✅ Qo'shdim\" tugmasini bosing\n"
-            "3. Kanaldan istalgan <b>bitta xabarni forward</b> qiling\n"
+            "3. Kanaldan istalgan <b>bitta xabarni ulashing</b>\n"
             "4. Bot avtomatik sozlaydi!\n\n"
-            "💡 <i>Kanal ID sini bilish uchun: kanaldan xabarni @idbot ga forward qiling "
-            "yoki shu yerda \"✅ Qo'shdim\" bosib, bizning botga forward qiling.</i>\n\n"
+            "💡 <i>Kanal ID sini bilish uchun: kanaldan xabarni @idbot ga ulashing "
+            "yoki shu yerda \"✅ Qo'shdim\" bosib, bizning botga ulashing.</i>\n\n"
             "👇 <b>Avval botni kanalga qo'shing:</b>"
         ),
         "ru": (
@@ -337,8 +337,8 @@ async def jf_setup_start_callback(update: Update, context: ContextTypes.DEFAULT_
 
     texts = {
         "uz": (
-            "👇 Kanalingizdan istalgan <b>bitta xabarni</b> shu yerga forward qiling.\n\n"
-            "📌 <i>Qanday qilish: kanalga kiring → xabarni bosib turing → \"Forward\" → shu chatga yuboring</i>"
+            "👇 Kanalingizdan istalgan <b>bitta xabarni</b> shu yerga ulashing.\n\n"
+            "📌 <i>Qanday qilish: kanalga kiring → xabarni bosib turing → \"Ulashish\" → shu chatga yuboring</i>"
         ),
         "ru": (
             "👇 <b>Перешлите</b> любое сообщение из вашего канала сюда.\n\n"
@@ -399,7 +399,7 @@ async def jf_receive_channel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not channel_id:
         await message.reply_text(
             "❌ Kanal aniqlanmadi.\n\n"
-            "📌 Kanaldan bitta xabarni shu yerga <b>forward</b> qiling." if lang == "uz"
+            "📌 Kanaldan bitta xabarni shu yerga <b>ulashing</b>." if lang == "uz"
             else "❌ Канал не определён.\n\n"
             "📌 <b>Перешлите</b> сообщение из канала сюда." if lang == "ru"
             else "❌ Channel not detected.\n\n"
