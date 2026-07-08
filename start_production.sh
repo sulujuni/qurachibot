@@ -34,9 +34,11 @@ GIT_BRANCH="feature/forced-sub-referral-antiabuse"
 # ─── Stop mode ─────────────────────────────────────────────
 if [ "$1" = "stop" ]; then
     echo "🛑 Stopping Qurachi..."
-    # Stop updater
+    # Stop updater + trigger watcher
     if [ -f "$UPDATER_PID_FILE" ]; then
-        kill "$(cat "$UPDATER_PID_FILE")" 2>/dev/null && echo "  Stopped auto-updater"
+        while read -r pid; do
+            kill "$pid" 2>/dev/null && echo "  Stopped background PID $pid"
+        done < "$UPDATER_PID_FILE"
         rm -f "$UPDATER_PID_FILE"
     fi
     # Stop bot + web
@@ -167,6 +169,31 @@ auto_updater() {
     done
 }
 
+# ─── Manual restart trigger watcher ───────────────────────
+# Checks every 10 seconds for .restart_trigger file (written by Mini App admin)
+trigger_watcher() {
+    while true; do
+        sleep 10
+        if [ -f ".restart_trigger" ]; then
+            echo "[$(date)] Trigger watcher: manual restart requested!" >> "$LOG_FILE"
+            rm -f ".restart_trigger"
+
+            # Pull latest code
+            cd "$SCRIPT_DIR"
+            git_output=$(git pull origin "$GIT_BRANCH" 2>&1)
+            echo "[$(date)] git pull: $git_output" >> "$LOG_FILE"
+
+            # Restart services (even if no changes — admin wants a restart)
+            echo "[$(date)] Stopping services for manual restart..." >> "$LOG_FILE"
+            stop_services
+
+            echo "[$(date)] Restarting services..." >> "$LOG_FILE"
+            start_services
+            echo "[$(date)] ✅ Manual restart complete." >> "$LOG_FILE"
+        fi
+    done
+}
+
 # ─── Start services ───────────────────────────────────────
 start_services
 
@@ -174,6 +201,11 @@ start_services
 auto_updater &
 UPDATER_PID=$!
 echo "$UPDATER_PID" > "$UPDATER_PID_FILE"
+
+# ─── Start trigger watcher in background ─────────────────
+trigger_watcher &
+TRIGGER_PID=$!
+echo "$TRIGGER_PID" >> "$UPDATER_PID_FILE"
 
 # Read config for display
 read_config
@@ -203,6 +235,7 @@ cleanup() {
     echo ""
     echo "🛑 Stopping..."
     kill "$UPDATER_PID" 2>/dev/null
+    kill "$TRIGGER_PID" 2>/dev/null
     rm -f "$UPDATER_PID_FILE"
     stop_services
     echo "✅ Stopped."

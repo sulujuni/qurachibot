@@ -1439,6 +1439,31 @@ async def admin_set_restart_schedule(request: Request, x_telegram_init_data: str
     return {"success": True, **config}
 
 
+RESTART_TRIGGER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".restart_trigger")
+
+
+@router.post("/admin/restart-now")
+async def admin_restart_now(x_telegram_init_data: str | None = Header(None)):
+    """Admin: trigger an immediate git pull + restart by writing a trigger file.
+
+    The background auto-updater in start_production.sh checks for this file
+    every 10 seconds and performs an immediate update cycle when it finds it.
+    """
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    try:
+        with open(RESTART_TRIGGER_PATH, "w") as f:
+            f.write(f"triggered_by={user['id']}\ntimestamp={datetime.utcnow().isoformat()}\n")
+    except Exception as e:
+        logger.error("Failed to write restart trigger: %s", e)
+        return {"error": "Failed to trigger restart"}
+
+    logger.info("Manual restart triggered by admin %d", user["id"])
+    return {"success": True, "message": "Restart triggered. Bot will restart in ~10 seconds."}
+
+
 @router.get("/admin/dbinfo")
 async def admin_dbinfo(x_telegram_init_data: str | None = Header(None)):
     """Admin: get database info (table sizes, total rows)."""

@@ -260,6 +260,10 @@ const T = {
         restart_hour: "Soat", restart_minute: "Daqiqa", restart_jitter: "Tasodifiy kechikish (daqiqa)",
         restart_enabled: "Yoqilgan", restart_disabled: "O'chirilgan",
         restart_save: "Saqlash", restart_saved: "✅ Yangilanish vaqti saqlandi!",
+        restart_now: "🔄 Hozir qayta ishga tushirish",
+        restart_now_desc: "Bot yangilanadi va darhol qayta ishga tushadi (~10 soniya).",
+        restart_now_confirm: "Botni hozir qayta ishga tushirasizmi?",
+        restart_now_triggered: "✅ Qayta ishga tushirish boshlandi! ~10 soniya kuting.",
     },
     ru: {
         home: 'Главная', games: 'Мои игры', leaders: 'Рейтинг', create: 'Создать', profile: 'Профиль', admin: 'Админ',
@@ -330,6 +334,10 @@ const T = {
         restart_hour: "Час", restart_minute: "Минута", restart_jitter: "Случайная задержка (мин)",
         restart_enabled: "Включено", restart_disabled: "Выключено",
         restart_save: "Сохранить", restart_saved: "✅ Расписание обновления сохранено!",
+        restart_now: "🔄 Перезапустить сейчас",
+        restart_now_desc: "Бот обновится и перезапустится немедленно (~10 секунд).",
+        restart_now_confirm: "Перезапустить бота прямо сейчас?",
+        restart_now_triggered: "✅ Перезапуск начат! Подождите ~10 секунд.",
     },
     en: {
         home: 'Home', games: 'My Games', leaders: 'Leaderboard', create: 'Create', profile: 'Profile', admin: 'Admin',
@@ -400,6 +408,10 @@ const T = {
         restart_hour: "Hour", restart_minute: "Minute", restart_jitter: "Random jitter (min)",
         restart_enabled: "Enabled", restart_disabled: "Disabled",
         restart_save: "Save", restart_saved: "✅ Update schedule saved!",
+        restart_now: "🔄 Restart Now",
+        restart_now_desc: "Bot will update and restart immediately (~10 seconds).",
+        restart_now_confirm: "Restart the bot right now?",
+        restart_now_triggered: "✅ Restart triggered! Wait ~10 seconds.",
     },
 };
 
@@ -1013,6 +1025,10 @@ async function renderAdmin() {
             <input type="checkbox" id="restartEnabled" ${schedule.enabled !== false ? 'checked' : ''} style="width:20px;height:20px;">
         </div>
         <button class="btn btn-primary" onclick="saveRestartSchedule()">${t('restart_save')}</button>
+        <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+            <p style="font-size:12px;color:var(--text-hint);margin-bottom:8px;">${t('restart_now_desc')}</p>
+            <button class="btn btn-secondary" style="background:#ff5252;color:#fff;margin-top:0;" onclick="restartNow()">${t('restart_now')}</button>
+        </div>
     </div>`;
 
     // Feedback viewer (admin)
@@ -1065,6 +1081,14 @@ async function saveRestartSchedule() {
     });
     if (res.error) { showToast(res.error, 'error'); return; }
     showToast(t('restart_saved'));
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+}
+
+async function restartNow() {
+    if (!confirm(t('restart_now_confirm'))) return;
+    const res = await api('/admin/restart-now', 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(t('restart_now_triggered'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
 }
 </script>
