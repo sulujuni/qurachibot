@@ -11,28 +11,19 @@ class CaptchaChallenge:
 
 
 def generate_captcha() -> CaptchaChallenge:
-    """Generate a simple math captcha."""
-    ops = [
-        ("add", "+"),
-        ("sub", "-"),
-        ("mul", "×"),
-    ]
-    op_type, op_symbol = random.choice(ops)
+    """Generate a very simple math captcha (1-digit numbers, + or - only)."""
+    op_type = random.choice(["+", "-"])
 
-    if op_type == "add":
-        a = random.randint(1, 50)
-        b = random.randint(1, 50)
+    if op_type == "+":
+        a = random.randint(1, 9)
+        b = random.randint(1, 9)
         answer = a + b
-    elif op_type == "sub":
-        a = random.randint(10, 99)
-        b = random.randint(1, a)
+    else:
+        a = random.randint(2, 9)
+        b = random.randint(1, a - 1)  # ensure positive result
         answer = a - b
-    else:  # mul
-        a = random.randint(2, 12)
-        b = random.randint(2, 12)
-        answer = a * b
 
-    question = f"{a} {op_symbol} {b} = ?"
+    question = f"{a} {op_type} {b} = ?"
     return CaptchaChallenge(question=question, answer=answer)
 
 
