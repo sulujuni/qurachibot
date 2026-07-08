@@ -255,6 +255,11 @@ const T = {
         us_verified: "CAPTCHA o'tgan", us_today: "Bugungi faollar",
         dbinfo_title: "Ma'lumotlar bazasi",
         db_size: "Hajmi", db_table: "Jadval", db_rows: "Qatorlar",
+        restart_title: "Avtomatik yangilanish",
+        restart_desc: "Bot har kuni belgilangan vaqtda o'zini yangilaydi va qayta ishga tushadi.",
+        restart_hour: "Soat", restart_minute: "Daqiqa", restart_jitter: "Tasodifiy kechikish (daqiqa)",
+        restart_enabled: "Yoqilgan", restart_disabled: "O'chirilgan",
+        restart_save: "Saqlash", restart_saved: "✅ Yangilanish vaqti saqlandi!",
     },
     ru: {
         home: 'Главная', games: 'Мои игры', leaders: 'Рейтинг', create: 'Создать', profile: 'Профиль', admin: 'Админ',
@@ -320,6 +325,11 @@ const T = {
         us_verified: "Прошли CAPTCHA", us_today: "Активны сегодня",
         dbinfo_title: "База данных",
         db_size: "Размер", db_table: "Таблица", db_rows: "Строки",
+        restart_title: "Автообновление",
+        restart_desc: "Бот ежедневно обновляется и перезапускается в указанное время.",
+        restart_hour: "Час", restart_minute: "Минута", restart_jitter: "Случайная задержка (мин)",
+        restart_enabled: "Включено", restart_disabled: "Выключено",
+        restart_save: "Сохранить", restart_saved: "✅ Расписание обновления сохранено!",
     },
     en: {
         home: 'Home', games: 'My Games', leaders: 'Leaderboard', create: 'Create', profile: 'Profile', admin: 'Admin',
@@ -385,6 +395,11 @@ const T = {
         us_verified: "Passed CAPTCHA", us_today: "Active today",
         dbinfo_title: "Database Info",
         db_size: "Size", db_table: "Table", db_rows: "Rows",
+        restart_title: "Auto-Update Schedule",
+        restart_desc: "Bot auto-updates and restarts daily at the specified time.",
+        restart_hour: "Hour", restart_minute: "Minute", restart_jitter: "Random jitter (min)",
+        restart_enabled: "Enabled", restart_disabled: "Disabled",
+        restart_save: "Save", restart_saved: "✅ Update schedule saved!",
     },
 };
 
@@ -974,6 +989,32 @@ async function renderAdmin() {
     }
     html += `</div></div>`;
 
+    // Auto-restart schedule control
+    const schedule = await api('/admin/restart-schedule');
+    html += `<div class="card">
+        <div class="card-title">🔄 ${t('restart_title')}</div>
+        <p style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">${t('restart_desc')}</p>
+        <div style="display:flex;gap:10px;margin-bottom:10px;">
+            <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:var(--text-hint);">${t('restart_hour')}</label>
+                <input type="number" id="restartHour" class="form-input" min="0" max="23" value="${schedule.restart_hour ?? 3}" style="margin-top:4px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:var(--text-hint);">${t('restart_minute')}</label>
+                <input type="number" id="restartMin" class="form-input" min="0" max="59" value="${schedule.restart_minute ?? 0}" style="margin-top:4px;">
+            </div>
+            <div style="flex:1;">
+                <label style="font-size:11px;font-weight:600;color:var(--text-hint);">${t('restart_jitter')}</label>
+                <input type="number" id="restartJitter" class="form-input" min="0" max="120" value="${schedule.jitter_minutes ?? 30}" style="margin-top:4px;">
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+            <label style="font-size:13px;font-weight:600;">${schedule.enabled !== false ? t('restart_enabled') : t('restart_disabled')}</label>
+            <input type="checkbox" id="restartEnabled" ${schedule.enabled !== false ? 'checked' : ''} style="width:20px;height:20px;">
+        </div>
+        <button class="btn btn-primary" onclick="saveRestartSchedule()">${t('restart_save')}</button>
+    </div>`;
+
     // Feedback viewer (admin)
     const feedbackData = await api('/admin/feedback');
     html += `<div class="card">
@@ -1012,6 +1053,19 @@ async function adminCancel(id) {
     if (res.error) { showToast(res.error, 'error'); return; }
     showToast("✅ " + t('cancel_btn'));
     renderAdmin();
+}
+
+async function saveRestartSchedule() {
+    const hour = parseInt(document.getElementById('restartHour').value) || 3;
+    const minute = parseInt(document.getElementById('restartMin').value) || 0;
+    const jitter = parseInt(document.getElementById('restartJitter').value) || 30;
+    const enabled = document.getElementById('restartEnabled').checked;
+    const res = await api('/admin/restart-schedule', 'POST', {
+        restart_hour: hour, restart_minute: minute, jitter_minutes: jitter, enabled: enabled
+    });
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(t('restart_saved'));
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
 }
 </script>
 

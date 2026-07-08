@@ -14,8 +14,9 @@
 #   ./start_production.sh stop    # Stop both
 #
 # Features:
-#   - Auto-update: every night at ~3:00 AM (with 0–30 min random jitter)
-#     the bot stops, pulls latest code from git, and restarts automatically.
+#   - Auto-update: reads schedule from update_config.json
+#   - Restart time configurable via Mini App admin panel
+#   - Random jitter to avoid exact restart times
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ cd "$SCRIPT_DIR"
 PID_FILE=".prod_pids"
 UPDATER_PID_FILE=".updater_pid"
 LOG_FILE="auto_update.log"
+CONFIG_FILE="update_config.json"
 GIT_BRANCH="feature/forced-sub-referral-antiabuse"
 
 # ─── Stop mode ─────────────────────────────────────────────
@@ -85,26 +87,62 @@ stop_services() {
     sleep 2
 }
 
+# ─── Read config from update_config.json ──────────────────
+read_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        CFG_HOUR=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('restart_hour',3))" 2>/dev/null || echo 3)
+        CFG_MIN=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('restart_minute',0))" 2>/dev/null || echo 0)
+        CFG_JITTER=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('jitter_minutes',30))" 2>/dev/null || echo 30)
+        CFG_ENABLED=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('enabled',True))" 2>/dev/null || echo "True")
+    else
+        CFG_HOUR=3
+        CFG_MIN=0
+        CFG_JITTER=30
+        CFG_ENABLED="True"
+    fi
+}
+
 # ─── Auto-updater background process ─────────────────────
 auto_updater() {
     while true; do
-        # Calculate seconds until next 3:00 AM
+        # Re-read config each cycle so Mini App changes take effect immediately
+        read_config
+
+        # If disabled, sleep 5 min then re-check
+        if [ "$CFG_ENABLED" = "False" ] || [ "$CFG_ENABLED" = "false" ]; then
+            echo "[$(date)] Auto-updater: disabled in config. Rechecking in 5min." >> "$LOG_FILE"
+            sleep 300
+            continue
+        fi
+
+        # Calculate seconds until target time
         now=$(date +%s)
-        # Next 3 AM today or tomorrow
-        target_today=$(date -d "today 03:00" +%s 2>/dev/null || date -d "03:00" +%s 2>/dev/null)
+        target_today=$(date -d "today ${CFG_HOUR}:$(printf '%02d' $CFG_MIN)" +%s 2>/dev/null || date -d "${CFG_HOUR}:$(printf '%02d' $CFG_MIN)" +%s 2>/dev/null)
         if [ "$target_today" -le "$now" ]; then
-            # 3 AM already passed today, aim for tomorrow
+            # Target time already passed today, aim for tomorrow
             target=$(( target_today + 86400 ))
         else
             target=$target_today
         fi
 
-        # Add random jitter: 0 to 1800 seconds (0–30 minutes)
-        jitter=$(( RANDOM % 1800 ))
+        # Add random jitter: 0 to (CFG_JITTER * 60) seconds
+        jitter_seconds=$(( CFG_JITTER * 60 ))
+        if [ "$jitter_seconds" -gt 0 ]; then
+            jitter=$(( RANDOM % jitter_seconds ))
+        else
+            jitter=0
+        fi
         sleep_seconds=$(( target - now + jitter ))
 
-        echo "[$(date)] Auto-updater: next update in ${sleep_seconds}s (~$(( sleep_seconds / 3600 ))h $(( (sleep_seconds % 3600) / 60 ))m)" >> "$LOG_FILE"
+        echo "[$(date)] Auto-updater: scheduled for ${CFG_HOUR}:$(printf '%02d' $CFG_MIN) +${jitter}s jitter (sleeping ${sleep_seconds}s)" >> "$LOG_FILE"
         sleep "$sleep_seconds"
+
+        # Re-read config after waking up (admin may have disabled while we slept)
+        read_config
+        if [ "$CFG_ENABLED" = "False" ] || [ "$CFG_ENABLED" = "false" ]; then
+            echo "[$(date)] Auto-updater: disabled after wakeup, skipping." >> "$LOG_FILE"
+            continue
+        fi
 
         echo "[$(date)] Auto-updater: starting update..." >> "$LOG_FILE"
 
@@ -137,6 +175,9 @@ auto_updater &
 UPDATER_PID=$!
 echo "$UPDATER_PID" > "$UPDATER_PID_FILE"
 
+# Read config for display
+read_config
+
 echo ""
 echo "═══════════════════════════════════════════════════"
 echo "  🎲 Qurachi Bot is running!"
@@ -147,8 +188,10 @@ echo "  📱 Mini App: https://qurachi.mooo.com/miniapp"
 echo ""
 echo "  Caddy handles HTTPS automatically (Let's Encrypt)"
 echo ""
-echo "  🔄 Auto-update: daily at ~3:00 AM (±30min jitter)"
-echo "     Logs: $LOG_FILE"
+echo "  🔄 Auto-update: daily at ${CFG_HOUR}:$(printf '%02d' $CFG_MIN) (±${CFG_JITTER}min jitter)"
+echo "     Enabled: $CFG_ENABLED"
+echo "     Config:  $CONFIG_FILE"
+echo "     Logs:    $LOG_FILE"
 echo ""
 echo "  Press Ctrl+C to stop bot + web server + updater"
 echo "  (Caddy keeps running as a system service)"

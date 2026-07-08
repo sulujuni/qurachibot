@@ -1,0 +1,6 @@
+{
+  "restart_hour": 3,
+  "restart_minute": 0,
+  "jitter_minutes": 30,
+  "enabled": true
+}

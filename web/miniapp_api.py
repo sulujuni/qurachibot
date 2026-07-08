@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs
 
@@ -1374,6 +1375,68 @@ async def admin_users_count(x_telegram_init_data: str | None = Header(None)):
         "verified": verified,
         "today_active": today_active,
     }
+
+
+# ─── Admin: Restart Schedule ──────────────────────────────────────────────────
+
+UPDATE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "update_config.json")
+
+
+@router.get("/admin/restart-schedule")
+async def admin_get_restart_schedule(x_telegram_init_data: str | None = Header(None)):
+    """Admin: get current auto-restart schedule from update_config.json."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    try:
+        with open(UPDATE_CONFIG_PATH, "r") as f:
+            config = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        config = {"restart_hour": 3, "restart_minute": 0, "jitter_minutes": 30, "enabled": True}
+
+    return config
+
+
+@router.post("/admin/restart-schedule")
+async def admin_set_restart_schedule(request: Request, x_telegram_init_data: str | None = Header(None)):
+    """Admin: update auto-restart schedule in update_config.json."""
+    user = _get_user_from_header(x_telegram_init_data)
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    body = await request.json()
+
+    # Validate inputs
+    hour = int(body.get("restart_hour", 3))
+    minute = int(body.get("restart_minute", 0))
+    jitter = int(body.get("jitter_minutes", 30))
+    enabled = bool(body.get("enabled", True))
+
+    if not (0 <= hour <= 23):
+        return {"error": "Hour must be 0-23"}
+    if not (0 <= minute <= 59):
+        return {"error": "Minute must be 0-59"}
+    if not (0 <= jitter <= 120):
+        return {"error": "Jitter must be 0-120 minutes"}
+
+    config = {
+        "restart_hour": hour,
+        "restart_minute": minute,
+        "jitter_minutes": jitter,
+        "enabled": enabled,
+    }
+
+    try:
+        with open(UPDATE_CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+    except Exception as e:
+        logger.error("Failed to write update_config.json: %s", e)
+        return {"error": "Failed to save config"}
+
+    logger.info("Restart schedule updated by admin %d: %02d:%02d, jitter=%dmin, enabled=%s", user["id"], hour, minute, jitter, enabled)
+    return {"success": True, **config}
 
 
 @router.get("/admin/dbinfo")
