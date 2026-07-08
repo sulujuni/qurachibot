@@ -163,5 +163,17 @@
   "gg_only_creator_cancel": "❌ Only the creator can cancel.",
   "gg_already_finished": "❌ Already finished.",
   "gg_cancel_done": "❌ Giveaway <b>'{title}'</b> cancelled.",
-  "gg_no_participants_expired": "❌ Giveaway <b>'{title}'</b> ended with no valid entries."
+  "gg_no_participants_expired": "❌ Giveaway <b>'{title}'</b> ended with no valid entries.",
+
+  "alert_giveaway_header": "New Giveaway!",
+  "alert_contest_header": "New Contest!",
+  "alert_prize_label": "Prize",
+  "alert_winners_label": "Winners",
+  "alert_giveaway_cta": "👉 Open the bot to join before it ends!",
+  "alert_contest_cta": "👉 Open the bot to submit your entry!",
+
+  "sub_already": "✅ You're already subscribed to alerts!",
+  "sub_done": "🔔 <b>Subscribed!</b>\n\nYou'll be notified when:\n• A new giveaway is created\n• A new contest is created\n• A giveaway or contest is ending soon",
+  "unsub_not": "ℹ️ You're not subscribed to alerts.",
+  "unsub_done": "🔕 Unsubscribed. You won't receive notifications anymore."
 }

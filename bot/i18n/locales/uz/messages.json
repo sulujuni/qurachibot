@@ -163,5 +163,17 @@
   "gg_only_creator_cancel": "❌ Faqat yaratuvchi bekor qila oladi.",
   "gg_already_finished": "❌ Allaqachon tugagan.",
   "gg_cancel_done": "❌ <b>'{title}'</b> yutuqli o'yini bekor qilindi.",
-  "gg_no_participants_expired": "❌ <b>'{title}'</b> yutuqli o'yini ishtiroksiz tugadi."
+  "gg_no_participants_expired": "❌ <b>'{title}'</b> yutuqli o'yini ishtiroksiz tugadi.",
+
+  "alert_giveaway_header": "Yangi yutuqli o'yin!",
+  "alert_contest_header": "Yangi konkurs!",
+  "alert_prize_label": "Sovg'a",
+  "alert_winners_label": "G'oliblar",
+  "alert_giveaway_cta": "👉 Ishtirok etish uchun botni oching, tugab qolmasin!",
+  "alert_contest_cta": "👉 Ishtirokingizni yuborish uchun botni oching!",
+
+  "sub_already": "✅ Siz allaqachon bildirishnomalarga obuna bo'lgansiz!",
+  "sub_done": "🔔 <b>Obuna bo'ldingiz!</b>\n\nQuyidagi hollarda xabar olasiz:\n• Yangi yutuqli o'yin yaratilganda\n• Yangi konkurs yaratilganda\n• Yutuqli o'yin yoki konkurs tugashiga oz qolganda",
+  "unsub_not": "ℹ️ Siz bildirishnomalarga obuna bo'lmagansiz.",
+  "unsub_done": "🔕 Obuna bekor qilindi. Endi bildirishnoma olmaysiz."
 }

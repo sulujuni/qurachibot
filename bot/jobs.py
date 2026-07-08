@@ -17,6 +17,8 @@ from bot.models.group_giveaway import (
     GroupGiveawayWinner,
 )
 from bot.models.notification import AlertSubscription, ScheduledReminder
+from bot.i18n.core import get_text
+from bot.utils.lang import get_user_lang
 
 logger = logging.getLogger(__name__)
 
@@ -327,29 +329,44 @@ async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for sub in subscribers:
         try:
+            lang = await get_user_lang(sub.user_id)
+        except Exception:
+            lang = "en"
+        try:
             for gw in new_giveaways:
                 if gw.creator_id == sub.user_id:
                     continue  # Don't notify creator
+                lines = [
+                    f"🔔 <b>{get_text('alert_giveaway_header', lang)}</b>",
+                    "",
+                    f"🎉 <b>{gw.title}</b>",
+                ]
+                if gw.prize:
+                    lines.append(f"🎁 {get_text('alert_prize_label', lang)}: {gw.prize}")
+                lines.append(f"🏆 {get_text('alert_winners_label', lang)}: {gw.winner_count}")
+                lines.append("")
+                lines.append(get_text("alert_giveaway_cta", lang))
                 await context.bot.send_message(
                     sub.user_id,
-                    f"🔔 <b>New Giveaway!</b>\n\n"
-                    f"🎉 {gw.title}\n"
-                    f"🎁 Prize: {gw.prize}\n"
-                    f"🏆 Winners: {gw.winner_count}\n\n"
-                    f"Join before it ends!",
+                    "\n".join(lines),
                     parse_mode="HTML",
                 )
 
             for ct in new_contests:
                 if ct.creator_id == sub.user_id:
                     continue
+                lines = [
+                    f"🔔 <b>{get_text('alert_contest_header', lang)}</b>",
+                    "",
+                    f"🏅 <b>{ct.title}</b>",
+                ]
+                if ct.prize:
+                    lines.append(f"🎁 {get_text('alert_prize_label', lang)}: {ct.prize}")
+                lines.append("")
+                lines.append(get_text("alert_contest_cta", lang))
                 await context.bot.send_message(
                     sub.user_id,
-                    f"🔔 <b>New Contest!</b>\n\n"
-                    f"🏅 {ct.title}\n"
-                    f"📂 Type: {ct.contest_type.value}\n"
-                    f"{f'🎁 Prize: {ct.prize}' if ct.prize else ''}\n\n"
-                    f"Submit your entry now!",
+                    "\n".join(lines),
                     parse_mode="HTML",
                 )
         except Exception:
