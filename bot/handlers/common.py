@@ -20,19 +20,19 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
         "uz": [
             ["🎲 Yutuqli o'yin yaratish", "📋 Mening o'yinlarim"],
             ["🏅 Konkurs yaratish", "🏆 Reyting"],
-            ["👥 Do'st taklif qilish", "🚪 Join filter"],
+            ["👥 Do'st taklif qilish", "🚪 So'rovlarni boshqarish"],
             ["⚙️ Sozlamalar"],
         ],
         "ru": [
             ["🎲 Создать розыгрыш", "📋 Мои розыгрыши"],
             ["🏅 Создать конкурс", "🏆 Рейтинг"],
-            ["👥 Пригласить друга", "🚪 Join filter"],
+            ["👥 Пригласить друга", "🚪 Управление заявками"],
             ["⚙️ Настройки"],
         ],
         "en": [
             ["🎲 Create Giveaway", "📋 My Giveaways"],
             ["🏅 Create Contest", "🏆 Leaderboard"],
-            ["👥 Invite Friends", "🚪 Join Filter"],
+            ["👥 Invite Friends", "🚪 Join Requests"],
             ["⚙️ Settings"],
         ],
     }
@@ -258,9 +258,77 @@ async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '🚪 Join Filter' button tap."""
-    from bot.handlers.join_request import joinfilter_command
-    await joinfilter_command(update, context)
+    """Handle '🚪 Join Requests' button tap — shows explanation + add to channel."""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    bot_username = context.bot.username
+
+    texts = {
+        "uz": (
+            "🚪 <b>Kanalga qo'shilish so'rovlarini boshqarish</b>\n\n"
+            "Bu funksiya yordamida yopiq kanal yoki guruhga kelib tushadigan "
+            "barcha <b>qo'shilish so'rovlarini avtomatik qabul qilish</b> mumkin.\n\n"
+            "📌 <b>Qanday ishlaydi:</b>\n"
+            "1. Botni kanalingizga <b>admin</b> sifatida qo'shing\n"
+            "2. Kanalda yozing: <code>/joinfilter all</code>\n"
+            "3. Tayyor! Bot barcha so'rovlarni avtomatik qabul qiladi\n\n"
+            "🔸 <b>Qo'shimcha rejimlar:</b>\n"
+            "• <code>/joinfilter females</code> — faqat ayollar\n"
+            "• <code>/joinfilter males</code> — faqat erkaklar\n"
+            "• <code>/joinfilter subscribed @kanal</code> — obuna shart\n"
+            "• <code>/joinfilter premium</code> — faqat Premium\n"
+            "• <code>/joinfilter off</code> — o'chirish\n\n"
+            "⚠️ <i>females/males rejimlar faqat botda CAPTCHA o'tgan foydalanuvchilarga ishlaydi. "
+            "Qolganlari uchun \"all\" rejimi eng mos.</i>"
+        ),
+        "ru": (
+            "🚪 <b>Управление заявками на вступление</b>\n\n"
+            "Эта функция автоматически принимает все <b>заявки на вступление</b> "
+            "в ваш закрытый канал или группу.\n\n"
+            "📌 <b>Как это работает:</b>\n"
+            "1. Добавьте бота в канал как <b>администратора</b>\n"
+            "2. Напишите в канале: <code>/joinfilter all</code>\n"
+            "3. Готово! Бот автоматически принимает все заявки\n\n"
+            "🔸 <b>Дополнительные режимы:</b>\n"
+            "• <code>/joinfilter females</code> — только девушки\n"
+            "• <code>/joinfilter males</code> — только парни\n"
+            "• <code>/joinfilter subscribed @канал</code> — подписчики\n"
+            "• <code>/joinfilter premium</code> — только Premium\n"
+            "• <code>/joinfilter off</code> — выключить\n\n"
+            "⚠️ <i>Режимы females/males работают только для пользователей, "
+            "прошедших CAPTCHA в боте. Для остальных подойдёт режим \"all\".</i>"
+        ),
+        "en": (
+            "🚪 <b>Manage Join Requests</b>\n\n"
+            "This feature automatically accepts all <b>join requests</b> "
+            "to your private channel or group.\n\n"
+            "📌 <b>How it works:</b>\n"
+            "1. Add the bot to your channel as an <b>admin</b>\n"
+            "2. Type in the channel: <code>/joinfilter all</code>\n"
+            "3. Done! Bot auto-accepts all join requests\n\n"
+            "🔸 <b>Additional modes:</b>\n"
+            "• <code>/joinfilter females</code> — females only\n"
+            "• <code>/joinfilter males</code> — males only\n"
+            "• <code>/joinfilter subscribed @channel</code> — subscribers\n"
+            "• <code>/joinfilter premium</code> — Premium only\n"
+            "• <code>/joinfilter off</code> — disable\n\n"
+            "⚠️ <i>females/males modes only work for users who passed CAPTCHA "
+            "in the bot. For everyone else, use \"all\" mode.</i>"
+        ),
+    }
+
+    text = texts.get(lang, texts["uz"])
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "➕ Kanalga/guruhga qo'shish" if lang == "uz"
+            else "➕ Добавить в канал/группу" if lang == "ru"
+            else "➕ Add to channel/group",
+            url=f"https://t.me/{bot_username}?startgroup=true&admin=invite_users"
+        )],
+    ])
+
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -381,7 +449,7 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
         MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
-        MessageHandler(filters.Regex(r"^(🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
+        MessageHandler(filters.Regex(r"^(🚪 So'rovlarni boshqarish|🚪 Управление заявками|🚪 Join Requests|🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
         MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
     ]
 
