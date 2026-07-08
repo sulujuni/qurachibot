@@ -211,7 +211,7 @@ const T = {
         join_filter_title: "Join so'rovlarini boshqarish",
         join_filter_desc: "Yopiq kanal/guruhga qo'shilish so'rovlarini avtomatik boshqarish.",
         add_filter: "Yangi filter qo'shish", save: 'Saqlash',
-        channel_input: "Kanal/guruh ID yoki @username", mode: 'Rejim',
+        channel_input: "Kanal ID (raqam)", mode: 'Rejim',
         sub_channels: "Obuna shart kanallar",
         leaderboard_title: "Eng faol foydalanuvchilar", no_leaderboard: "Hali reyting ma'lumotlari yo'q",
         pts: 'ball',
@@ -276,7 +276,7 @@ const T = {
         current_lang: 'Текущий язык',
         join_filter_title: 'Управление заявками', join_filter_desc: 'Автоматическая обработка заявок на вступление.',
         add_filter: 'Добавить фильтр', save: 'Сохранить',
-        channel_input: 'ID или @username канала/группы', mode: 'Режим',
+        channel_input: 'ID канала (число)', mode: 'Режим',
         sub_channels: 'Обязательная подписка',
         leaderboard_title: 'Самые активные', no_leaderboard: 'Рейтинг пока пуст',
         pts: 'баллов',
@@ -341,7 +341,7 @@ const T = {
         current_lang: 'Current language',
         join_filter_title: 'Join Request Filters', join_filter_desc: 'Auto-process join requests for private channels.',
         add_filter: 'Add filter', save: 'Save',
-        channel_input: 'Channel/group ID or @username', mode: 'Mode',
+        channel_input: 'Channel ID (numeric)', mode: 'Mode',
         sub_channels: 'Required subscription channels',
         leaderboard_title: 'Top Users', no_leaderboard: 'No leaderboard data yet',
         pts: 'pts',
@@ -1173,9 +1173,15 @@ async function renderProfile() {
         html += `
             <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
                 <b style="font-size:13px;">➕ ${t('add_filter')}</b>
-                <div class="form-group" style="margin-top:10px;">
+                <div style="padding:10px;background:var(--bg-secondary);border-radius:var(--radius-sm);margin:10px 0;font-size:12px;">
+                    ${currentLang === 'uz' ? '💡 <b>Oson usul:</b> Botga qaytib, "🚪 So\'rovlarni boshqarish" tugmasini bosing va kanaldan xabar forward qiling. Yoki quyida kanal ID sini kiriting:' :
+                     currentLang === 'ru' ? '💡 <b>Проще:</b> Вернитесь в бот, нажмите "🚪 Управление заявками" и перешлите сообщение из канала. Или введите ID канала ниже:' :
+                     '💡 <b>Easier way:</b> Go back to the bot, tap "🚪 Join Requests" and forward a message from your channel. Or enter channel ID below:'}
+                </div>
+                <div class="form-group">
                     <label class="form-label">${t('channel_input')}</label>
-                    <input class="form-input" id="jfChatId" placeholder="@your_channel / -1001234567890">
+                    <input class="form-input" id="jfChatId" placeholder="-1001234567890">
+                    <div class="form-hint">${currentLang === 'uz' ? 'Kanal raqamli ID si (forward usuli osonroq)' : currentLang === 'ru' ? 'Числовой ID канала (перешлите сообщение — проще)' : 'Numeric channel ID (forwarding is easier)'}</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">${t('mode')}</label>
