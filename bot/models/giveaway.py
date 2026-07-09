@@ -23,13 +23,18 @@ class Giveaway(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=True)
-    prize: Mapped[str] = mapped_column(String(500), nullable=False)
+    prize: Mapped[str] = mapped_column(String(500), nullable=True)
     winner_count: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[GiveawayStatus] = mapped_column(
         Enum(GiveawayStatus), default=GiveawayStatus.ACTIVE
     )
     # Comma-separated list of channels users must join to participate (forced-sub)
     required_channels: Mapped[str] = mapped_column(Text, nullable=True)
+
+    # Post-based creation: the admin's original post content
+    post_text: Mapped[str] = mapped_column(Text, nullable=True)
+    post_file_id: Mapped[str] = mapped_column(String(500), nullable=True)
+    post_media_type: Mapped[str] = mapped_column(String(20), nullable=True)  # photo, video, animation, document
 
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

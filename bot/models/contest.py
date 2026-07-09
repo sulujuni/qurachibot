@@ -40,6 +40,11 @@ class Contest(Base):
     max_submissions_per_user: Mapped[int] = mapped_column(Integer, default=1)
     winner_count: Mapped[int] = mapped_column(Integer, default=1)
 
+    # Post-based creation: the admin's original post content
+    post_text: Mapped[str] = mapped_column(Text, nullable=True)
+    post_file_id: Mapped[str] = mapped_column(String(500), nullable=True)
+    post_media_type: Mapped[str] = mapped_column(String(20), nullable=True)  # photo, video, animation, document
+
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     creator_username: Mapped[str] = mapped_column(String(255), nullable=True)

@@ -498,6 +498,7 @@ const T = {
         active: 'Faol', ended: 'Tugagan', won: 'Yutdim', accepting: 'Qabul qilmoqda', voting: 'Ovoz berish',
         no_limit: 'Chegarasiz', left: 'qoldi',
         join_btn: 'Qatnashish', joined_btn: "✅ Qatnashyapsiz", join_success: "🎉 Muvaffaqiyatli qo'shildingiz!",
+        gw_created_success: "✅ Yaratildi!",
         gw_prize: "Sovg'a", gw_winners: "G'oliblar", gw_participants: "Ishtirokchilar", gw_ends: "Tugaydi",
         gw_join_prompt: "O'yinga qatnashish uchun quyidagi tugmani bosing:",
         gw_ended: "Bu o'yin tugagan", gw_subscribe_first: "Avval kanallarga obuna bo'ling:",
@@ -531,6 +532,7 @@ const T = {
         f_name: 'Nomi', f_prize: "Sovg'a", f_desc_opt: 'Tavsif (ixtiyoriy)',
         f_winners: "G'oliblar soni", f_duration: 'Davomiyligi / Tugash vaqti',
         f_channels: 'Majburiy obuna (ixtiyoriy)', f_channels_hint: "Qatnashish uchun obuna shart kanallar",
+        f_post_content: "Post matni", f_post_required: "Post matni kiritilishi shart!",
         f_deadline: 'Tugash sanasi va vaqti', f_deadline_hint: "O'yin shu vaqtda avtomatik tugaydi",
         f_mode: 'Tanlash usuli', f_keyword: "Kalit so'z", f_keyword_hint: "Izohda shu so'z bo'lishi shart",
         f_ctype: 'Ishtirok turi', f_maxsubs: 'Har bir kishi nechta ariza yubora oladi',
@@ -577,6 +579,7 @@ const T = {
         active: 'Активен', ended: 'Завершён', won: 'Выиграл', accepting: 'Приём', voting: 'Голосование',
         no_limit: 'Без ограничения', left: 'осталось',
         join_btn: 'Участвовать', joined_btn: '✅ Вы участвуете', join_success: '🎉 Вы успешно присоединились!',
+        gw_created_success: '✅ Создано!',
         gw_prize: 'Приз', gw_winners: 'Победители', gw_participants: 'Участники', gw_ends: 'Заканчивается',
         gw_join_prompt: 'Нажмите кнопку ниже, чтобы участвовать:',
         gw_ended: 'Этот розыгрыш завершён', gw_subscribe_first: 'Сначала подпишитесь на каналы:',
@@ -609,6 +612,7 @@ const T = {
         f_name: 'Название', f_prize: 'Приз', f_desc_opt: 'Описание (необязательно)',
         f_winners: 'Кол-во победителей', f_duration: 'Длительность / Время окончания',
         f_channels: 'Обязательная подписка (необязательно)', f_channels_hint: 'Каналы для обязательной подписки',
+        f_post_content: 'Содержание поста', f_post_required: 'Содержание поста обязательно!',
         f_deadline: 'Дата и время окончания', f_deadline_hint: 'Розыгрыш завершится в это время',
         f_mode: 'Способ выбора', f_keyword: 'Ключевое слово', f_keyword_hint: 'Комментарий должен содержать это слово',
         f_ctype: 'Тип заявки', f_maxsubs: 'Сколько заявок может отправить один человек',
@@ -655,6 +659,7 @@ const T = {
         active: 'Active', ended: 'Ended', won: 'Won', accepting: 'Accepting', voting: 'Voting',
         no_limit: 'No limit', left: 'left',
         join_btn: 'Join', joined_btn: '✅ Joined', join_success: '🎉 Successfully joined!',
+        gw_created_success: '✅ Created!',
         gw_prize: 'Prize', gw_winners: 'Winners', gw_participants: 'Participants', gw_ends: 'Ends',
         gw_join_prompt: 'Tap the button below to participate:',
         gw_ended: 'This giveaway has ended', gw_subscribe_first: 'Subscribe to these channels first:',
@@ -687,6 +692,7 @@ const T = {
         f_name: 'Title', f_prize: 'Prize', f_desc_opt: 'Description (optional)',
         f_winners: 'Number of winners', f_duration: 'Duration / Deadline',
         f_channels: 'Required subscription (optional)', f_channels_hint: 'Channels users must subscribe to',
+        f_post_content: 'Post content', f_post_required: 'Post content is required!',
         f_deadline: 'End date & time', f_deadline_hint: 'The giveaway ends at this time',
         f_mode: 'Selection method', f_keyword: 'Keyword', f_keyword_hint: 'Comment must contain this word',
         f_ctype: 'Entry type', f_maxsubs: 'Entries allowed per person',
@@ -1123,18 +1129,21 @@ function setCreateType(type) { createType = type; renderCreate(); }
 
 function renderCreateForm() {
     const f = document.getElementById('createForm');
-    const req = ' *';
+    const postHint = currentLang === 'uz' ? "O'yin postini o'zingiz xohlagan formatda yozing (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). Rasm/video qo'shish uchun botga yuboring." :
+        currentLang === 'ru' ? 'Напишите пост розыгрыша в любом формате (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). Для медиа — отправьте через бота.' :
+        'Write your giveaway post in any format (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). For media, send via bot.';
+    const mediaHint = currentLang === 'uz' ? "📷 Rasm/video bilan post yaratish uchun botga /newgiveaway, /groupgiveaway yoki /newcontest yuboring." :
+        currentLang === 'ru' ? '📷 Для поста с фото/видео отправьте /newgiveaway, /groupgiveaway или /newcontest боту.' :
+        '📷 For posts with photos/videos, send /newgiveaway, /groupgiveaway or /newcontest to the bot.';
+
     if (createType === 'giveaway') {
         f.innerHTML = `
         <div class="info-box">
             <b>${t('btn_giveaway')}</b><br>${t('gw_desc_btn')}
         </div>
-        <div class="form-group"><label class="form-label">${t('f_name')}${req}</label>
-            <input class="form-input" id="cTitle"></div>
-        <div class="form-group"><label class="form-label">${t('f_prize')}${req}</label>
-            <input class="form-input" id="cPrize"></div>
-        <div class="form-group"><label class="form-label">${t('f_desc_opt')}</label>
-            <textarea class="form-textarea" id="cDesc"></textarea></div>
+        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
+            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
+            <div class="form-hint">${mediaHint}</div></div>
         <div class="form-group"><label class="form-label">${t('f_winners')}</label>
             <input class="form-input" id="cWinners" type="number" value="1" min="1"></div>
         <div class="form-group"><label class="form-label">${t('f_duration')}</label>
@@ -1151,12 +1160,9 @@ function renderCreateForm() {
         <div class="info-box">
             <b>${t('comment_giveaway')}</b><br>${t('gw_desc_cmt')}
         </div>
-        <div class="form-group"><label class="form-label">${t('f_name')}${req}</label>
-            <input class="form-input" id="cTitle"></div>
-        <div class="form-group"><label class="form-label">${t('f_prize')}${req}</label>
-            <input class="form-input" id="cPrize"></div>
-        <div class="form-group"><label class="form-label">${t('f_desc_opt')}</label>
-            <textarea class="form-textarea" id="cDesc"></textarea></div>
+        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
+            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
+            <div class="form-hint">${mediaHint}</div></div>
         <div class="form-group"><label class="form-label">${t('f_mode')}</label>
             <select class="form-select" id="cMode">
                 <option value="random">${t('m_random')}</option>
@@ -1189,12 +1195,9 @@ function renderCreateForm() {
         <div class="info-box">
             <b>${t('contest')}</b><br>${t('gw_desc_ct')}
         </div>
-        <div class="form-group"><label class="form-label">${t('f_name')}${req}</label>
-            <input class="form-input" id="cTitle"></div>
-        <div class="form-group"><label class="form-label">${t('f_prize')}</label>
-            <input class="form-input" id="cPrize"></div>
-        <div class="form-group"><label class="form-label">${t('f_desc_opt')}</label>
-            <textarea class="form-textarea" id="cDesc"></textarea></div>
+        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
+            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
+            <div class="form-hint">${mediaHint}</div></div>
         <div class="form-group"><label class="form-label">${t('f_ctype')}</label>
             <select class="form-select" id="cContestType">
                 <option value="text">${t('opt_text')}</option>
@@ -1203,8 +1206,6 @@ function renderCreateForm() {
             </select></div>
         <div class="form-group"><label class="form-label">${t('f_winners')}</label>
             <input class="form-input" id="cWinners" type="number" value="1" min="1"></div>
-        <div class="form-group"><label class="form-label">${t('f_maxsubs')}</label>
-            <input class="form-input" id="cMaxSubs" type="number" value="1" min="1"></div>
         <button class="btn btn-primary" onclick="submitContest()">${ic('medal',18)} ${t('create_btn')}</button>`;
     }
 }
@@ -1230,9 +1231,8 @@ function renderBroadcastForm() {
 
 <script>
 async function submitGiveaway() {
-    const title = document.getElementById('cTitle').value.trim();
-    const prize = document.getElementById('cPrize').value.trim();
-    if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
+    const postText = document.getElementById('cPostText').value.trim();
+    if (!postText) { showToast(t('f_post_required'), 'error'); return; }
 
     const durVal = document.getElementById('cDuration').value;
     let duration = durVal;
@@ -1244,8 +1244,7 @@ async function submitGiveaway() {
     }
 
     const body = {
-        title, prize,
-        description: document.getElementById('cDesc').value.trim() || null,
+        post_text: postText,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         duration: duration,
         deadline: deadline,
@@ -1253,15 +1252,14 @@ async function submitGiveaway() {
     };
     const res = await api('/create-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Yutuqli o'yin yaratildi! ID: " + res.id);
+    showToast(t('gw_created_success'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }
 
 async function submitCommentGiveaway() {
-    const title = document.getElementById('cTitle').value.trim();
-    const prize = document.getElementById('cPrize').value.trim();
-    if (!title || !prize) { showToast("Nom va sovg'ani kiriting!", 'error'); return; }
+    const postText = document.getElementById('cPostText').value.trim();
+    if (!postText) { showToast(t('f_post_required'), 'error'); return; }
     const mode = document.getElementById('cMode').value;
 
     const durVal = document.getElementById('cDuration').value;
@@ -1274,8 +1272,7 @@ async function submitCommentGiveaway() {
     }
 
     const body = {
-        title, prize,
-        description: document.getElementById('cDesc').value.trim() || null,
+        post_text: postText,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         duration: duration,
         deadline: deadline,
@@ -1285,25 +1282,22 @@ async function submitCommentGiveaway() {
     };
     const res = await api('/create-comment-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Izohli o'yin yaratildi!");
+    showToast(t('gw_created_success'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }
 
 async function submitContest() {
-    const title = document.getElementById('cTitle').value.trim();
-    if (!title) { showToast("Konkurs nomini kiriting!", 'error'); return; }
+    const postText = document.getElementById('cPostText').value.trim();
+    if (!postText) { showToast(t('f_post_required'), 'error'); return; }
     const body = {
-        title,
-        prize: document.getElementById('cPrize').value.trim() || null,
-        description: document.getElementById('cDesc').value.trim() || null,
+        post_text: postText,
         contest_type: document.getElementById('cContestType').value,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
-        max_submissions: parseInt(document.getElementById('cMaxSubs')?.value) || 1,
     };
     const res = await api('/create-contest', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast("✅ Konkurs yaratildi! ID: " + res.id);
+    showToast(t('gw_created_success'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     switchTab('home');
 }

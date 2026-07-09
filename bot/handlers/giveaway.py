@@ -1,4 +1,9 @@
-"""Giveaway command handlers with i18n support."""
+"""Giveaway command handlers — post-based creation flow.
+
+Admins send their giveaway post (text/photo/video) as-is.
+Bot asks only: winner count, duration, required channels.
+Then publishes the original post with a Join button.
+"""
 
 import random
 from datetime import datetime, timedelta
@@ -33,16 +38,12 @@ from bot.utils.subscription import (
     serialize_channels,
 )
 
-# Conversation states
-TITLE, DESCRIPTION, PRIZE, WINNER_COUNT, CHANNELS, DURATION = range(6)
+# Conversation states (post-based flow)
+POST, WINNERS, DURATION, CHANNELS = range(4)
 
 
 def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineKeyboardMarkup:
-    """Build the 'Join' button for a giveaway announcement.
-
-    If WEB_URL is configured, uses a Telegram Mini App button (opens an
-    interactive web page). Otherwise, falls back to a plain callback button.
-    """
+    """Build the 'Join' button for a giveaway announcement."""
     label = f"🎮 {get_text('gw_join_button', lang=lang)} ({participant_count})"
     web_url = settings.WEB_URL
     if web_url:
@@ -53,162 +54,266 @@ def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineK
     return InlineKeyboardMarkup([[button]])
 
 
-# ─── Create Giveaway ──────────────────────────────────────────────────────────
+def _extract_post_data(message) -> dict:
+    """Extract text, file_id, and media_type from a Telegram message."""
+    data = {"post_text": None, "post_file_id": None, "post_media_type": None}
+
+    if message.photo:
+        data["post_file_id"] = message.photo[-1].file_id
+        data["post_media_type"] = "photo"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.video:
+        data["post_file_id"] = message.video.file_id
+        data["post_media_type"] = "video"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.animation:
+        data["post_file_id"] = message.animation.file_id
+        data["post_media_type"] = "animation"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.document:
+        data["post_file_id"] = message.document.file_id
+        data["post_media_type"] = "document"
+        data["post_text"] = message.caption_html or message.caption or ""
+    else:
+        data["post_text"] = message.text_html or message.text or ""
+
+    return data
+
+
+async def send_giveaway_post(bot, chat_id, giveaway, keyboard):
+    """Re-send the admin's original post with the join button attached."""
+    if giveaway.post_file_id and giveaway.post_media_type:
+        media_type = giveaway.post_media_type
+        caption = giveaway.post_text or ""
+        if media_type == "photo":
+            return await bot.send_photo(
+                chat_id, giveaway.post_file_id,
+                caption=caption, parse_mode="HTML", reply_markup=keyboard,
+            )
+        elif media_type == "video":
+            return await bot.send_video(
+                chat_id, giveaway.post_file_id,
+                caption=caption, parse_mode="HTML", reply_markup=keyboard,
+            )
+        elif media_type == "animation":
+            return await bot.send_animation(
+                chat_id, giveaway.post_file_id,
+                caption=caption, parse_mode="HTML", reply_markup=keyboard,
+            )
+        elif media_type == "document":
+            return await bot.send_document(
+                chat_id, giveaway.post_file_id,
+                caption=caption, parse_mode="HTML", reply_markup=keyboard,
+            )
+    # Text-only
+    return await bot.send_message(
+        chat_id, giveaway.post_text or giveaway.title,
+        parse_mode="HTML", reply_markup=keyboard,
+    )
+
+
+# ─── Create Giveaway (post-based) ────────────────────────────────────────────
 
 
 async def new_giveaway_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the giveaway creation flow. Command: /newgiveaway"""
+    """Start giveaway creation. Ask admin to send the post."""
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
     context.user_data["lang"] = lang
-    text = get_text("gw_create_title", lang=lang)
-    await update.message.reply_text(text, parse_mode="HTML")
-    return TITLE
+    await update.message.reply_text(
+        get_text("gw_send_post", lang=lang), parse_mode="HTML"
+    )
+    return POST
 
 
-async def giveaway_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive giveaway title."""
+async def giveaway_receive_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive the admin's giveaway post (text/photo/video/etc)."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["giveaway_title"] = update.message.text.strip()
-    text = get_text("gw_create_description", lang=lang)
-    await update.message.reply_text(text, parse_mode="HTML")
-    return DESCRIPTION
+    message = update.message
 
+    # Extract post content
+    post_data = _extract_post_data(message)
+    context.user_data["post_data"] = post_data
 
-async def giveaway_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive giveaway description."""
-    lang = context.user_data.get("lang", "en")
-    text = update.message.text.strip()
-    if text.lower() == "/skip":
-        context.user_data["giveaway_description"] = None
-    else:
-        context.user_data["giveaway_description"] = text
+    # Auto-generate a title from first line of text (for internal reference)
+    text_content = post_data["post_text"] or ""
+    # Strip HTML tags for title extraction
+    import re
+    plain_text = re.sub(r"<[^>]+>", "", text_content)
+    first_line = plain_text.strip().split("\n")[0][:100] if plain_text.strip() else "Giveaway"
+    context.user_data["title"] = first_line
 
-    msg = get_text("gw_create_prize", lang=lang)
-    await update.message.reply_text(msg, parse_mode="HTML")
-    return PRIZE
-
-
-async def giveaway_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive the prize."""
-    lang = context.user_data.get("lang", "en")
-    context.user_data["giveaway_prize"] = update.message.text.strip()
-    msg = get_text("gw_create_winners", lang=lang)
-    await update.message.reply_text(msg, parse_mode="HTML")
-    return WINNER_COUNT
-
-
-async def giveaway_winner_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive winner count."""
-    lang = context.user_data.get("lang", "en")
-    try:
-        count = int(update.message.text.strip())
-        if count < 1:
-            raise ValueError
-    except ValueError:
-        msg = get_text("gw_invalid_number", lang=lang)
-        await update.message.reply_text(msg)
-        return WINNER_COUNT
-
-    context.user_data["giveaway_winner_count"] = count
-
-    msg = get_text("gw_create_channels", lang=lang)
-    await update.message.reply_text(msg, parse_mode="HTML")
-    return CHANNELS
-
-
-async def giveaway_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive the (optional) list of channels users must subscribe to."""
-    lang = context.user_data.get("lang", "en")
-    text = update.message.text.strip()
-
-    if text.lower() == "/skip":
-        context.user_data["giveaway_channels"] = None
-    else:
-        channels = parse_channels(text)
-        context.user_data["giveaway_channels"] = serialize_channels(channels)
-
+    # Ask winner count
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="dur_1h"),
-            InlineKeyboardButton(get_text("dur_6h", lang=lang), callback_data="dur_6h"),
+            InlineKeyboardButton("1", callback_data="gwwin_1"),
+            InlineKeyboardButton("2", callback_data="gwwin_2"),
+            InlineKeyboardButton("3", callback_data="gwwin_3"),
         ],
         [
-            InlineKeyboardButton(get_text("dur_12h", lang=lang), callback_data="dur_12h"),
-            InlineKeyboardButton(get_text("dur_24h", lang=lang), callback_data="dur_24h"),
+            InlineKeyboardButton("5", callback_data="gwwin_5"),
+            InlineKeyboardButton("10", callback_data="gwwin_10"),
         ],
-        [
-            InlineKeyboardButton(get_text("dur_3d", lang=lang), callback_data="dur_3d"),
-            InlineKeyboardButton(get_text("dur_7d", lang=lang), callback_data="dur_7d"),
-        ],
-        [InlineKeyboardButton(get_text("dur_none", lang=lang), callback_data="dur_none")],
     ])
+    await message.reply_text(
+        get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML"
+    )
+    return WINNERS
 
-    msg = get_text("gw_create_duration", lang=lang)
-    await update.message.reply_text(msg, reply_markup=keyboard)
+
+async def giveaway_winners_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle winner count button press."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("lang", "en")
+
+    count = int(query.data.split("_")[1])
+    context.user_data["winner_count"] = count
+
+    # Ask duration
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="gwdur_1h"),
+            InlineKeyboardButton(get_text("dur_6h", lang=lang), callback_data="gwdur_6h"),
+            InlineKeyboardButton(get_text("dur_12h", lang=lang), callback_data="gwdur_12h"),
+        ],
+        [
+            InlineKeyboardButton(get_text("dur_24h", lang=lang), callback_data="gwdur_24h"),
+            InlineKeyboardButton(get_text("dur_3d", lang=lang), callback_data="gwdur_3d"),
+            InlineKeyboardButton(get_text("dur_7d", lang=lang), callback_data="gwdur_7d"),
+        ],
+        [InlineKeyboardButton(get_text("dur_none", lang=lang), callback_data="gwdur_none")],
+    ])
+    await query.edit_message_text(
+        get_text("gw_ask_duration", lang=lang), reply_markup=keyboard, parse_mode="HTML"
+    )
     return DURATION
 
 
-async def giveaway_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle duration selection."""
+async def giveaway_duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle duration button press."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang", "en")
 
     duration_map = {
-        "dur_1h": timedelta(hours=1),
-        "dur_6h": timedelta(hours=6),
-        "dur_12h": timedelta(hours=12),
-        "dur_24h": timedelta(hours=24),
-        "dur_3d": timedelta(days=3),
-        "dur_7d": timedelta(days=7),
-        "dur_none": None,
+        "gwdur_1h": timedelta(hours=1),
+        "gwdur_6h": timedelta(hours=6),
+        "gwdur_12h": timedelta(hours=12),
+        "gwdur_24h": timedelta(hours=24),
+        "gwdur_3d": timedelta(days=3),
+        "gwdur_7d": timedelta(days=7),
+        "gwdur_none": None,
     }
-
     duration = duration_map.get(query.data)
-    ends_at = datetime.utcnow() + duration if duration else None
+    context.user_data["ends_at"] = (datetime.utcnow() + duration) if duration else None
 
-    # Save to database
+    # Ask channels
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(get_text("gw_add_channels_btn", lang=lang), callback_data="gwch_add"),
+            InlineKeyboardButton(get_text("gw_skip_channels_btn", lang=lang), callback_data="gwch_skip"),
+        ],
+    ])
+    await query.edit_message_text(
+        get_text("gw_ask_channels", lang=lang), reply_markup=keyboard, parse_mode="HTML"
+    )
+    return CHANNELS
+
+
+async def giveaway_channels_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle channels skip/add choice."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("lang", "en")
+
+    if query.data == "gwch_skip":
+        context.user_data["channels"] = None
+        return await _finalize_giveaway(query, context)
+    else:
+        # Ask user to type channels
+        await query.edit_message_text(
+            get_text("gw_type_channels", lang=lang), parse_mode="HTML"
+        )
+        return CHANNELS
+
+
+async def giveaway_channels_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive typed channels and finalize."""
+    lang = context.user_data.get("lang", "en")
+    text = update.message.text.strip()
+    channels = parse_channels(text)
+    context.user_data["channels"] = serialize_channels(channels) if channels else None
+
+    # Finalize — we don't have a callback_query here, so send a new message
+    return await _finalize_giveaway_from_message(update, context)
+
+
+async def _finalize_giveaway(query, context) -> int:
+    """Save giveaway to DB and publish the admin's original post."""
+    lang = context.user_data.get("lang", "en")
+    post_data = context.user_data["post_data"]
+
     async with async_session() as session:
         giveaway = Giveaway(
-            title=context.user_data["giveaway_title"],
-            description=context.user_data.get("giveaway_description"),
-            prize=context.user_data["giveaway_prize"],
-            winner_count=context.user_data["giveaway_winner_count"],
-            required_channels=context.user_data.get("giveaway_channels"),
+            title=context.user_data["title"],
+            post_text=post_data["post_text"],
+            post_file_id=post_data["post_file_id"],
+            post_media_type=post_data["post_media_type"],
+            winner_count=context.user_data["winner_count"],
+            required_channels=context.user_data.get("channels"),
             creator_id=query.from_user.id,
             creator_username=query.from_user.username,
             chat_id=query.message.chat_id,
-            ends_at=ends_at,
+            ends_at=context.user_data.get("ends_at"),
         )
         session.add(giveaway)
         await session.commit()
         await session.refresh(giveaway)
 
-    # Build announcement
-    end_text = (
-        get_text("gw_ends_at", lang=lang, time=ends_at.strftime("%Y-%m-%d %H:%M UTC"))
-        if ends_at
-        else get_text("gw_no_limit", lang=lang)
-    )
-    desc_text = f"\n📝 {giveaway.description}" if giveaway.description else ""
+    join_keyboard = _join_button(giveaway.id, 0, lang)
+
+    # Delete the settings message
+    try:
+        await query.delete_message()
+    except Exception:
+        pass
+
+    # Send the admin's original post with Join button
+    await send_giveaway_post(context.bot, query.message.chat_id, giveaway, join_keyboard)
+
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def _finalize_giveaway_from_message(update: Update, context) -> int:
+    """Same as _finalize_giveaway but triggered from a text message (channels typed)."""
+    lang = context.user_data.get("lang", "en")
+    post_data = context.user_data["post_data"]
+
+    async with async_session() as session:
+        giveaway = Giveaway(
+            title=context.user_data["title"],
+            post_text=post_data["post_text"],
+            post_file_id=post_data["post_file_id"],
+            post_media_type=post_data["post_media_type"],
+            winner_count=context.user_data["winner_count"],
+            required_channels=context.user_data.get("channels"),
+            creator_id=update.effective_user.id,
+            creator_username=update.effective_user.username,
+            chat_id=update.effective_chat.id,
+            ends_at=context.user_data.get("ends_at"),
+        )
+        session.add(giveaway)
+        await session.commit()
+        await session.refresh(giveaway)
 
     join_keyboard = _join_button(giveaway.id, 0, lang)
 
-    announcement = get_text(
-        "gw_announcement", lang=lang,
-        title=giveaway.title,
-        description=desc_text,
-        prize=giveaway.prize,
-        winner_count=giveaway.winner_count,
-        end_text=end_text,
-        participants=0,
-    )
+    # Send the admin's original post with Join button
+    await send_giveaway_post(context.bot, update.effective_chat.id, giveaway, join_keyboard)
 
-    await query.edit_message_text(
-        announcement, reply_markup=join_keyboard, parse_mode="HTML"
-    )
-
+    await update.message.reply_text(get_text("gw_created_success", lang=lang), parse_mode="HTML")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -226,15 +331,13 @@ async def cancel_creation(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle 'Join Giveaway' button."""
+    """Handle 'Join Giveaway' button press."""
     query = update.callback_query
     giveaway_id = int(query.data.split("_")[-1])
     user = query.from_user
     lang = await get_user_lang(user.id)
 
     async with async_session() as session:
-        # Note: participants are NOT eagerly loaded here — at scale a giveaway
-        # can have tens of thousands of entries. We use COUNT queries instead.
         result = await session.execute(
             select(Giveaway).where(Giveaway.id == giveaway_id)
         )
@@ -265,7 +368,7 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
 
         required_channels = parse_channels(giveaway.required_channels)
 
-    # Enforce channel subscription (forced-sub) before joining
+    # Enforce channel subscription
     if required_channels:
         missing = await get_unsubscribed(context.bot, user.id, required_channels)
         if missing:
@@ -287,8 +390,6 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
             return
 
     async with async_session() as session:
-
-        # Add participant
         participant = GiveawayParticipant(
             giveaway_id=giveaway_id,
             user_id=user.id,
@@ -298,10 +399,6 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
         session.add(participant)
         await session.commit()
 
-        # Refresh giveaway + count without loading every participant row.
-        giveaway = (
-            await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
-        ).scalar_one()
         participant_count = (
             await session.execute(
                 select(func.count(GiveawayParticipant.id)).where(
@@ -310,35 +407,15 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
             )
         ).scalar()
 
-    # The user just proved channel membership by joining — credit any pending
-    # referral that was waiting on their subscription.
     await verify_pending_referrals(context.bot, user.id)
-
     await query.answer(get_text("gw_joined", lang=lang, count=participant_count))
 
-    # Update message
-    end_text = (
-        get_text("gw_ends_at", lang=lang, time=giveaway.ends_at.strftime("%Y-%m-%d %H:%M UTC"))
-        if giveaway.ends_at
-        else get_text("gw_no_limit", lang=lang)
-    )
-    desc_text = f"\n📝 {giveaway.description}" if giveaway.description else ""
-
-    join_keyboard = _join_button(giveaway.id, participant_count, lang)
-
-    announcement = get_text(
-        "gw_announcement", lang=lang,
-        title=giveaway.title,
-        description=desc_text,
-        prize=giveaway.prize,
-        winner_count=giveaway.winner_count,
-        end_text=end_text,
-        participants=participant_count,
-    )
-
-    await query.edit_message_text(
-        announcement, reply_markup=join_keyboard, parse_mode="HTML"
-    )
+    # Update inline keyboard with new participant count
+    join_keyboard = _join_button(giveaway_id, participant_count, lang)
+    try:
+        await query.edit_message_reply_markup(reply_markup=join_keyboard)
+    except Exception:
+        pass
 
 
 # ─── Draw Winners ───────────────────────────────────────────────────────────────
@@ -399,7 +476,6 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(get_text("gw_no_participants", lang=lang))
             return
 
-        # Draw winners
         winner_count = min(giveaway.winner_count, len(participants))
         winners = random.sample(participants, winner_count)
 
@@ -423,7 +499,7 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     result_text = get_text(
         "gw_results", lang=lang,
         title=giveaway.title,
-        prize=giveaway.prize,
+        prize=giveaway.prize or "",
         total=len(participants),
         winners=winners_text,
     )
@@ -463,8 +539,7 @@ async def my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         emoji = status_emoji.get(gw.status, "❓")
         text += (
             f"{emoji} <b>{gw.title}</b> (ID: {gw.id})\n"
-            f"   🎁 {gw.prize} | 👤 {len(gw.participants)}\n"
-            f"   Status: {gw.status.value}\n\n"
+            f"   👤 {len(gw.participants)} | {gw.status.value}\n\n"
         )
 
     await update.message.reply_text(text, parse_mode="HTML")
@@ -533,18 +608,19 @@ def get_giveaway_handlers() -> list:
     create_conv = ConversationHandler(
         entry_points=[CommandHandler("newgiveaway", new_giveaway_start)],
         states={
-            TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_title)],
-            DESCRIPTION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_description),
-                CommandHandler("skip", giveaway_description),
+            POST: [
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL)
+                    & ~filters.COMMAND,
+                    giveaway_receive_post,
+                ),
             ],
-            PRIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_prize)],
-            WINNER_COUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_winner_count)],
+            WINNERS: [CallbackQueryHandler(giveaway_winners_selected, pattern=r"^gwwin_")],
+            DURATION: [CallbackQueryHandler(giveaway_duration_selected, pattern=r"^gwdur_")],
             CHANNELS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channels),
-                CommandHandler("skip", giveaway_channels),
+                CallbackQueryHandler(giveaway_channels_choice, pattern=r"^gwch_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channels_typed),
             ],
-            DURATION: [CallbackQueryHandler(giveaway_duration, pattern=r"^dur_")],
         },
         fallbacks=[CommandHandler("cancel", cancel_creation)],
     )

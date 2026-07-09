@@ -175,5 +175,21 @@
   "sub_already": "✅ You're already subscribed to alerts!",
   "sub_done": "🔔 <b>Subscribed!</b>\n\nYou'll be notified when:\n• A new giveaway is created\n• A new contest is created\n• A giveaway or contest is ending soon",
   "unsub_not": "ℹ️ You're not subscribed to alerts.",
-  "unsub_done": "🔕 Unsubscribed. You won't receive notifications anymore."
+  "unsub_done": "🔕 Unsubscribed. You won't receive notifications anymore.",
+
+  "gw_send_post": "📝 <b>Send me the giveaway post</b>\n\nSend it exactly as you want participants to see it — text, photo, or video. Your formatting will be preserved.",
+  "gw_ask_winners": "🏆 <b>How many winners?</b>",
+  "gw_ask_duration": "⏰ <b>How long should it run?</b>",
+  "gw_ask_channels": "📢 <b>Require channel subscription?</b>\n\nUsers must subscribe to these channels before joining.",
+  "gw_add_channels_btn": "➕ Add channels",
+  "gw_skip_channels_btn": "⏭ Skip",
+  "gw_type_channels": "📢 Send channel usernames or IDs, separated by commas.\n\nExample: <code>@channel1, @channel2</code>",
+  "gw_created_success": "✅ Giveaway created successfully!",
+  "gg_send_post": "📝 <b>Send the giveaway post</b>\n\nSend it as you want it to appear in the group/channel — text, photo, or video. Users will reply to or react on this post to enter.",
+  "gg_created_success": "✅ Group giveaway created! Post published.",
+  "ct_send_post": "📝 <b>Send the contest announcement</b>\n\nSend it as you want participants to see it — text, photo, or video. Users will submit entries to this contest.",
+  "ct_ask_type": "📎 <b>What type of entries should participants submit?</b>",
+  "ct_ask_winners": "🏆 <b>How many winners?</b>",
+  "f_post_content": "Post content",
+  "f_post_required": "Post content is required!"
 }

@@ -175,5 +175,21 @@
   "sub_already": "✅ Siz allaqachon bildirishnomalarga obuna bo'lgansiz!",
   "sub_done": "🔔 <b>Obuna bo'ldingiz!</b>\n\nQuyidagi hollarda xabar olasiz:\n• Yangi yutuqli o'yin yaratilganda\n• Yangi konkurs yaratilganda\n• Yutuqli o'yin yoki konkurs tugashiga oz qolganda",
   "unsub_not": "ℹ️ Siz bildirishnomalarga obuna bo'lmagansiz.",
-  "unsub_done": "🔕 Obuna bekor qilindi. Endi bildirishnoma olmaysiz."
+  "unsub_done": "🔕 Obuna bekor qilindi. Endi bildirishnoma olmaysiz.",
+
+  "gw_send_post": "📝 <b>Yutuqli o'yin postini yuboring</b>\n\nIshtirokchilar ko'radigan tarzda yuboring — matn, rasm yoki video. Formatlash saqlanib qoladi.",
+  "gw_ask_winners": "🏆 <b>Nechta g'olib?</b>",
+  "gw_ask_duration": "⏰ <b>Qancha davom etadi?</b>",
+  "gw_ask_channels": "📢 <b>Kanalga obuna shart qilasizmi?</b>\n\nIshtirokchilar bu kanallarga obuna bo'lishi kerak.",
+  "gw_add_channels_btn": "➕ Kanal qo'shish",
+  "gw_skip_channels_btn": "⏭ O'tkazib yuborish",
+  "gw_type_channels": "📢 Kanal username yoki ID larini vergul bilan yuboring.\n\nMisol: <code>@kanal1, @kanal2</code>",
+  "gw_created_success": "✅ Yutuqli o'yin yaratildi!",
+  "gg_send_post": "📝 <b>O'yin postini yuboring</b>\n\nGuruh/kanalda ko'rinadigan tarzda yuboring — matn, rasm yoki video. Ishtirokchilar shu postga javob yozib yoki reaksiya qo'yib qatnashadilar.",
+  "gg_created_success": "✅ Guruh o'yini yaratildi! Post joylandi.",
+  "ct_send_post": "📝 <b>Konkurs e'lonini yuboring</b>\n\nIshtirokchilar ko'radigan tarzda yuboring — matn, rasm yoki video. Ishtirokchilar bu konkursga ariza yuboradilar.",
+  "ct_ask_type": "📎 <b>Ishtirokchilar qanday ariza yuborishadi?</b>",
+  "ct_ask_winners": "🏆 <b>Nechta g'olib?</b>",
+  "f_post_content": "Post matni",
+  "f_post_required": "Post matni kiritilishi shart!"
 }

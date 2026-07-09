@@ -37,8 +37,8 @@ from bot.utils.subscription import get_unsubscribed, parse_channels, serialize_c
 from bot.utils.referral import verify_pending_referrals
 
 
-# Conversation states for group giveaway creation
-GG_TITLE, GG_PRIZE, GG_MODE, GG_KEYWORD, GG_WINNERS, GG_CHANNELS, GG_DURATION = range(7)
+# Conversation states for group giveaway creation (post-based)
+GG_POST, GG_MODE, GG_KEYWORD, GG_WINNERS, GG_DURATION, GG_CHANNELS = range(6)
 
 # In-memory cache for fast lookups. In multi-worker deployments, a miss here
 # falls through to the DB, so workers that didn't create the giveaway still
@@ -100,34 +100,65 @@ async def _load_active_giveaways():
 
 
 
-# ─── Create Giveaway (works in groups AND channels) ─────────────────────────────
+# ─── Create Giveaway (post-based — works in groups AND channels) ──────────────
+
+
+def _extract_post_data(message) -> dict:
+    """Extract text, file_id, and media_type from a Telegram message."""
+    data = {"post_text": None, "post_file_id": None, "post_media_type": None}
+    if message.photo:
+        data["post_file_id"] = message.photo[-1].file_id
+        data["post_media_type"] = "photo"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.video:
+        data["post_file_id"] = message.video.file_id
+        data["post_media_type"] = "video"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.animation:
+        data["post_file_id"] = message.animation.file_id
+        data["post_media_type"] = "animation"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.document:
+        data["post_file_id"] = message.document.file_id
+        data["post_media_type"] = "document"
+        data["post_text"] = message.caption_html or message.caption or ""
+    else:
+        data["post_text"] = message.text_html or message.text or ""
+    return data
+
+
+async def _send_gg_post(bot, chat_id, giveaway):
+    """Send the admin's original post to the group/channel."""
+    text = giveaway.post_text or giveaway.title
+    if giveaway.post_file_id and giveaway.post_media_type:
+        mt = giveaway.post_media_type
+        if mt == "photo":
+            return await bot.send_photo(chat_id, giveaway.post_file_id, caption=text, parse_mode="HTML")
+        elif mt == "video":
+            return await bot.send_video(chat_id, giveaway.post_file_id, caption=text, parse_mode="HTML")
+        elif mt == "animation":
+            return await bot.send_animation(chat_id, giveaway.post_file_id, caption=text, parse_mode="HTML")
+        elif mt == "document":
+            return await bot.send_document(chat_id, giveaway.post_file_id, caption=text, parse_mode="HTML")
+    return await bot.send_message(chat_id, text, parse_mode="HTML")
 
 
 async def groupgiveaway_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start group/channel giveaway creation. Command: /groupgiveaway"""
     chat = update.effective_chat
-    chat_type = chat.type
-
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
 
-    # Allow: groups, supergroups, and channels
-    if chat_type == "private":
+    if chat.type == "private":
         await update.message.reply_text(get_text("gg_use_in_group", lang=lang), parse_mode="HTML")
         return ConversationHandler.END
 
     context.user_data["gg_lang"] = lang
     context.user_data["gg_chat_id"] = chat.id
-    context.user_data["gg_is_channel"] = (chat_type == "channel")
+    context.user_data["gg_is_channel"] = (chat.type == "channel")
 
-    source = get_text(
-        "gg_source_channel" if chat_type == "channel" else "gg_source_group",
-        lang=lang,
-    )
-    await update.message.reply_text(
-        get_text("gg_create_intro", lang=lang, source=source), parse_mode="HTML"
-    )
-    return GG_TITLE
+    await update.message.reply_text(get_text("gg_send_post", lang=lang), parse_mode="HTML")
+    return GG_POST
 
 
 async def channelgiveaway_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -144,23 +175,18 @@ async def channelgiveaway_start(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["gg_chat_id"] = chat.id
     context.user_data["gg_is_channel"] = True
 
-    await update.message.reply_text(get_text("gg_channel_intro", lang=lang), parse_mode="HTML")
-    return GG_TITLE
+    await update.message.reply_text(get_text("gg_send_post", lang=lang), parse_mode="HTML")
+    return GG_POST
 
 
-
-async def gg_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive title."""
+async def gg_receive_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive the admin's giveaway post."""
     lang = context.user_data.get("gg_lang", "en")
-    context.user_data["gg_title"] = update.message.text.strip()
-    await update.message.reply_text(get_text("gg_ask_prize", lang=lang), parse_mode="HTML")
-    return GG_PRIZE
-
-
-async def gg_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive prize."""
-    lang = context.user_data.get("gg_lang", "en")
-    context.user_data["gg_prize"] = update.message.text.strip()
+    import re
+    post_data = _extract_post_data(update.message)
+    context.user_data["gg_post_data"] = post_data
+    plain = re.sub(r"<[^>]+>", "", post_data["post_text"] or "")
+    context.user_data["gg_title"] = plain.strip().split("\n")[0][:100] or "Group Giveaway"
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(get_text("gg_mode_random_btn", lang=lang), callback_data="ggmode_random")],
@@ -168,10 +194,7 @@ async def gg_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         [InlineKeyboardButton(get_text("gg_mode_keyword_btn", lang=lang), callback_data="ggmode_keyword")],
         [InlineKeyboardButton(get_text("gg_mode_reaction_btn", lang=lang), callback_data="ggmode_reaction")],
     ])
-
-    await update.message.reply_text(
-        get_text("gg_ask_mode", lang=lang), reply_markup=keyboard, parse_mode="HTML"
-    )
+    await update.message.reply_text(get_text("gg_ask_mode", lang=lang), reply_markup=keyboard, parse_mode="HTML")
     return GG_MODE
 
 
@@ -194,166 +217,159 @@ async def gg_mode_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return GG_KEYWORD
     else:
         context.user_data["gg_keyword"] = None
-        await query.edit_message_text(get_text("gg_ask_winners", lang=lang), parse_mode="HTML")
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("1", callback_data="ggwin_1"), InlineKeyboardButton("2", callback_data="ggwin_2"), InlineKeyboardButton("3", callback_data="ggwin_3")],
+            [InlineKeyboardButton("5", callback_data="ggwin_5"), InlineKeyboardButton("10", callback_data="ggwin_10")],
+        ])
+        await query.edit_message_text(get_text("gg_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
         return GG_WINNERS
 
 
 async def gg_keyword(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive keyword."""
+    """Receive keyword, then ask winners."""
     lang = context.user_data.get("gg_lang", "en")
     context.user_data["gg_keyword"] = update.message.text.strip()
-    await update.message.reply_text(get_text("gg_ask_winners", lang=lang), parse_mode="HTML")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("1", callback_data="ggwin_1"), InlineKeyboardButton("2", callback_data="ggwin_2"), InlineKeyboardButton("3", callback_data="ggwin_3")],
+        [InlineKeyboardButton("5", callback_data="ggwin_5"), InlineKeyboardButton("10", callback_data="ggwin_10")],
+    ])
+    await update.message.reply_text(get_text("gg_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
     return GG_WINNERS
 
 
-async def gg_winners(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive winner count."""
+async def gg_winners_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle winner count button."""
+    query = update.callback_query
+    await query.answer()
     lang = context.user_data.get("gg_lang", "en")
-    try:
-        count = int(update.message.text.strip())
-        if count < 1:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text(get_text("gg_invalid_number", lang=lang))
-        return GG_WINNERS
-
-    context.user_data["gg_winner_count"] = count
-    await update.message.reply_text(get_text("gg_ask_channels", lang=lang), parse_mode="HTML")
-    return GG_CHANNELS
-
-
-async def gg_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive the (optional) required subscription channels."""
-    lang = context.user_data.get("gg_lang", "en")
-    text = update.message.text.strip()
-
-    if text.lower() == "/skip":
-        context.user_data["gg_channels"] = None
-    else:
-        context.user_data["gg_channels"] = serialize_channels(parse_channels(text))
+    context.user_data["gg_winner_count"] = int(query.data.split("_")[1])
 
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="ggdur_1h"),
-            InlineKeyboardButton(get_text("dur_6h", lang=lang), callback_data="ggdur_6h"),
-        ],
-        [
-            InlineKeyboardButton(get_text("dur_12h", lang=lang), callback_data="ggdur_12h"),
-            InlineKeyboardButton(get_text("dur_24h", lang=lang), callback_data="ggdur_24h"),
-        ],
-        [
-            InlineKeyboardButton(get_text("dur_3d", lang=lang), callback_data="ggdur_3d"),
-            InlineKeyboardButton(get_text("dur_7d", lang=lang), callback_data="ggdur_7d"),
-        ],
+        [InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="ggdur_1h"), InlineKeyboardButton(get_text("dur_6h", lang=lang), callback_data="ggdur_6h"), InlineKeyboardButton(get_text("dur_12h", lang=lang), callback_data="ggdur_12h")],
+        [InlineKeyboardButton(get_text("dur_24h", lang=lang), callback_data="ggdur_24h"), InlineKeyboardButton(get_text("dur_3d", lang=lang), callback_data="ggdur_3d"), InlineKeyboardButton(get_text("dur_7d", lang=lang), callback_data="ggdur_7d")],
         [InlineKeyboardButton(get_text("dur_none", lang=lang), callback_data="ggdur_none")],
     ])
-
-    await update.message.reply_text(
-        get_text("gg_ask_duration", lang=lang), reply_markup=keyboard
-    )
+    await query.edit_message_text(get_text("gg_ask_duration", lang=lang), reply_markup=keyboard, parse_mode="HTML")
     return GG_DURATION
 
 
-
-async def gg_duration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle duration and create the giveaway post."""
+async def gg_duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle duration button and ask channels."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("gg_lang", "en")
 
     duration_map = {
-        "ggdur_1h": timedelta(hours=1),
-        "ggdur_6h": timedelta(hours=6),
-        "ggdur_12h": timedelta(hours=12),
-        "ggdur_24h": timedelta(hours=24),
-        "ggdur_3d": timedelta(days=3),
-        "ggdur_7d": timedelta(days=7),
-        "ggdur_none": None,
+        "ggdur_1h": timedelta(hours=1), "ggdur_6h": timedelta(hours=6),
+        "ggdur_12h": timedelta(hours=12), "ggdur_24h": timedelta(hours=24),
+        "ggdur_3d": timedelta(days=3), "ggdur_7d": timedelta(days=7), "ggdur_none": None,
     }
     duration = duration_map.get(query.data)
-    ends_at = datetime.utcnow() + duration if duration else None
+    context.user_data["gg_ends_at"] = (datetime.utcnow() + duration) if duration else None
 
-    mode = context.user_data["gg_mode"]
-    keyword = context.user_data.get("gg_keyword")
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton(get_text("gw_add_channels_btn", lang=lang), callback_data="ggch_add"),
+        InlineKeyboardButton(get_text("gw_skip_channels_btn", lang=lang), callback_data="ggch_skip"),
+    ]])
+    await query.edit_message_text(get_text("gg_ask_channels", lang=lang), reply_markup=keyboard, parse_mode="HTML")
+    return GG_CHANNELS
+
+
+async def gg_channels_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle channels Add/Skip."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("gg_lang", "en")
+    if query.data == "ggch_skip":
+        context.user_data["gg_channels"] = None
+        return await _finalize_gg(query, context)
+    await query.edit_message_text(get_text("gw_type_channels", lang=lang), parse_mode="HTML")
+    return GG_CHANNELS
+
+
+async def gg_channels_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive typed channels and finalize."""
+    text = update.message.text.strip()
+    channels = parse_channels(text)
+    context.user_data["gg_channels"] = serialize_channels(channels) if channels else None
+    return await _finalize_gg_msg(update, context)
+
+
+async def _finalize_gg(query, context) -> int:
+    """Save to DB and post the admin's original message."""
+    post_data = context.user_data["gg_post_data"]
     chat_id = context.user_data["gg_chat_id"]
     is_channel = context.user_data.get("gg_is_channel", False)
-    required_channels = context.user_data.get("gg_channels")
 
-    # Save to database
     async with async_session() as session:
         giveaway = GroupGiveaway(
             title=context.user_data["gg_title"],
-            prize=context.user_data["gg_prize"],
+            post_text=post_data["post_text"], post_file_id=post_data["post_file_id"],
+            post_media_type=post_data["post_media_type"],
             winner_count=context.user_data["gg_winner_count"],
-            mode=mode,
-            keyword=keyword,
-            required_channels=required_channels,
-            creator_id=query.from_user.id,
-            creator_username=query.from_user.username,
-            chat_id=chat_id,
-            ends_at=ends_at,
-            is_channel_post=is_channel,
+            mode=context.user_data["gg_mode"], keyword=context.user_data.get("gg_keyword"),
+            required_channels=context.user_data.get("gg_channels"),
+            creator_id=query.from_user.id, creator_username=query.from_user.username,
+            chat_id=chat_id, ends_at=context.user_data.get("gg_ends_at"), is_channel_post=is_channel,
         )
         session.add(giveaway)
         await session.commit()
         await session.refresh(giveaway)
 
-    # Build the announcement
-    mode_labels = {
-        GroupGiveawayMode.RANDOM: get_text("gg_lbl_random", lang=lang),
-        GroupGiveawayMode.FIRST_N: get_text("gg_lbl_first_n", lang=lang, count=giveaway.winner_count),
-        GroupGiveawayMode.KEYWORD: get_text("gg_lbl_keyword", lang=lang, keyword=keyword),
-        GroupGiveawayMode.REACTION: get_text("gg_lbl_reaction", lang=lang),
-    }
-    end_text = (
-        get_text("gg_ends_at", lang=lang, time=ends_at.strftime("%Y-%m-%d %H:%M UTC"))
-        if ends_at else get_text("gg_no_limit", lang=lang)
-    )
-    keyword_text = get_text("gg_kw_required_line", lang=lang, keyword=keyword) if keyword else ""
-    source_icon = "📢" if is_channel else "🎯"
-    how_to_enter = get_text(
-        "gg_how_react" if mode == GroupGiveawayMode.REACTION else "gg_how_comment",
-        lang=lang,
-    )
-
-    announcement = get_text(
-        "gg_announcement", lang=lang,
-        icon=source_icon,
-        title=giveaway.title,
-        prize=giveaway.prize,
-        winners=giveaway.winner_count,
-        mode=mode_labels[mode],
-        keyword_text=keyword_text,
-        end_text=end_text,
-        how_to_enter=how_to_enter,
-        id=giveaway.id,
-    )
-
-    # Delete the conversation message
     try:
-        await query.message.delete()
+        await query.delete_message()
     except Exception:
         pass
 
-    # Send the giveaway post
-    sent_message = await context.bot.send_message(
-        chat_id=chat_id, text=announcement, parse_mode="HTML",
-    )
+    sent = await _send_gg_post(context.bot, chat_id, giveaway)
 
-    # Store message_id
     async with async_session() as session:
-        result = await session.execute(
-            select(GroupGiveaway).where(GroupGiveaway.id == giveaway.id)
-        )
-        gw = result.scalar_one()
-        gw.message_id = sent_message.message_id
+        gw = (await session.execute(select(GroupGiveaway).where(GroupGiveaway.id == giveaway.id))).scalar_one()
+        gw.message_id = sent.message_id
         await session.commit()
 
-    # Track in memory
-    _active_giveaway_posts[(chat_id, sent_message.message_id)] = giveaway.id
+    _active_giveaway_posts[(chat_id, sent.message_id)] = giveaway.id
     if is_channel:
-        _channel_post_giveaways[(chat_id, sent_message.message_id)] = giveaway.id
+        _channel_post_giveaways[(chat_id, sent.message_id)] = giveaway.id
 
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+async def _finalize_gg_msg(update: Update, context) -> int:
+    """Same as _finalize_gg but from text message."""
+    lang = context.user_data.get("gg_lang", "en")
+    post_data = context.user_data["gg_post_data"]
+    chat_id = context.user_data["gg_chat_id"]
+    is_channel = context.user_data.get("gg_is_channel", False)
+
+    async with async_session() as session:
+        giveaway = GroupGiveaway(
+            title=context.user_data["gg_title"],
+            post_text=post_data["post_text"], post_file_id=post_data["post_file_id"],
+            post_media_type=post_data["post_media_type"],
+            winner_count=context.user_data["gg_winner_count"],
+            mode=context.user_data["gg_mode"], keyword=context.user_data.get("gg_keyword"),
+            required_channels=context.user_data.get("gg_channels"),
+            creator_id=update.effective_user.id, creator_username=update.effective_user.username,
+            chat_id=chat_id, ends_at=context.user_data.get("gg_ends_at"), is_channel_post=is_channel,
+        )
+        session.add(giveaway)
+        await session.commit()
+        await session.refresh(giveaway)
+
+    sent = await _send_gg_post(context.bot, chat_id, giveaway)
+
+    async with async_session() as session:
+        gw = (await session.execute(select(GroupGiveaway).where(GroupGiveaway.id == giveaway.id))).scalar_one()
+        gw.message_id = sent.message_id
+        await session.commit()
+
+    _active_giveaway_posts[(chat_id, sent.message_id)] = giveaway.id
+    if is_channel:
+        _channel_post_giveaways[(chat_id, sent.message_id)] = giveaway.id
+
+    await update.message.reply_text(get_text("gg_created_success", lang=lang), parse_mode="HTML")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -939,16 +955,21 @@ def get_group_giveaway_handlers() -> list:
             CommandHandler("channelgiveaway", channelgiveaway_start),
         ],
         states={
-            GG_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, gg_title)],
-            GG_PRIZE: [MessageHandler(filters.TEXT & ~filters.COMMAND, gg_prize)],
+            GG_POST: [
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL)
+                    & ~filters.COMMAND,
+                    gg_receive_post,
+                ),
+            ],
             GG_MODE: [CallbackQueryHandler(gg_mode_selected, pattern=r"^ggmode_")],
             GG_KEYWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, gg_keyword)],
-            GG_WINNERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, gg_winners)],
+            GG_WINNERS: [CallbackQueryHandler(gg_winners_selected, pattern=r"^ggwin_")],
+            GG_DURATION: [CallbackQueryHandler(gg_duration_selected, pattern=r"^ggdur_")],
             GG_CHANNELS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, gg_channels),
-                CommandHandler("skip", gg_channels),
+                CallbackQueryHandler(gg_channels_choice, pattern=r"^ggch_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, gg_channels_typed),
             ],
-            GG_DURATION: [CallbackQueryHandler(gg_duration, pattern=r"^ggdur_")],
         },
         fallbacks=[CommandHandler("cancel", gg_cancel)],
     )

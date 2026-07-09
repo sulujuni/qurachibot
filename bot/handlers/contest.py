@@ -25,40 +25,73 @@ from bot.models import (
 )
 from bot.utils.lang import get_user_lang, t
 
-# Conversation states
-C_TITLE, C_DESCRIPTION, C_TYPE, C_PRIZE, C_MAX_SUBMISSIONS, C_WINNERS = range(6)
+# Conversation states (post-based)
+CT_POST, CT_TYPE, CT_WINNERS = range(3)
 
 
 
-# ─── Create Contest ──────────────────────────────────────────────────────────────
+# ─── Create Contest (post-based) ─────────────────────────────────────────────────
+
+
+def _extract_post_data(message) -> dict:
+    """Extract text, file_id, and media_type from a Telegram message."""
+    data = {"post_text": None, "post_file_id": None, "post_media_type": None}
+    if message.photo:
+        data["post_file_id"] = message.photo[-1].file_id
+        data["post_media_type"] = "photo"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.video:
+        data["post_file_id"] = message.video.file_id
+        data["post_media_type"] = "video"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.animation:
+        data["post_file_id"] = message.animation.file_id
+        data["post_media_type"] = "animation"
+        data["post_text"] = message.caption_html or message.caption or ""
+    elif message.document:
+        data["post_file_id"] = message.document.file_id
+        data["post_media_type"] = "document"
+        data["post_text"] = message.caption_html or message.caption or ""
+    else:
+        data["post_text"] = message.text_html or message.text or ""
+    return data
+
+
+async def _send_contest_post(bot, chat_id, contest, keyboard):
+    """Re-send the admin's original post with submit/view buttons."""
+    text = contest.post_text or contest.title
+    if contest.post_file_id and contest.post_media_type:
+        mt = contest.post_media_type
+        if mt == "photo":
+            return await bot.send_photo(chat_id, contest.post_file_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+        elif mt == "video":
+            return await bot.send_video(chat_id, contest.post_file_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+        elif mt == "animation":
+            return await bot.send_animation(chat_id, contest.post_file_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+        elif mt == "document":
+            return await bot.send_document(chat_id, contest.post_file_id, caption=text, parse_mode="HTML", reply_markup=keyboard)
+    return await bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def new_contest_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start contest creation. Command: /newcontest"""
+    """Start contest creation. Ask admin to send the post."""
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
     context.user_data["lang"] = lang
-    text = get_text("ct_create_title", lang=lang)
-    await update.message.reply_text(text, parse_mode="HTML")
-    return C_TITLE
+    await update.message.reply_text(get_text("ct_send_post", lang=lang), parse_mode="HTML")
+    return CT_POST
 
 
-async def contest_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def contest_receive_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive the admin's contest post."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["contest_title"] = update.message.text.strip()
-    text = get_text("ct_create_description", lang=lang)
-    await update.message.reply_text(text, parse_mode="HTML")
-    return C_DESCRIPTION
+    import re
+    post_data = _extract_post_data(update.message)
+    context.user_data["post_data"] = post_data
+    plain = re.sub(r"<[^>]+>", "", post_data["post_text"] or "")
+    context.user_data["title"] = plain.strip().split("\n")[0][:100] or "Contest"
 
-
-async def contest_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = context.user_data.get("lang", "en")
-    text = update.message.text.strip()
-    if text.lower() == "/skip":
-        context.user_data["contest_description"] = None
-    else:
-        context.user_data["contest_description"] = text
-
+    # Ask submission type
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(get_text("ct_type_text", lang=lang), callback_data="ctype_text"),
@@ -66,95 +99,65 @@ async def contest_description(update: Update, context: ContextTypes.DEFAULT_TYPE
         ],
         [InlineKeyboardButton(get_text("ct_type_any", lang=lang), callback_data="ctype_any")],
     ])
-    msg = get_text("ct_create_type", lang=lang)
-    await update.message.reply_text(msg, reply_markup=keyboard, parse_mode="HTML")
-    return C_TYPE
-
+    await update.message.reply_text(get_text("ct_ask_type", lang=lang), reply_markup=keyboard, parse_mode="HTML")
+    return CT_TYPE
 
 
 async def contest_type_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle submission type selection, then ask winners."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang", "en")
     type_map = {"ctype_text": ContestType.TEXT, "ctype_photo": ContestType.PHOTO, "ctype_any": ContestType.ANY}
     context.user_data["contest_type"] = type_map[query.data]
-    msg = get_text("ct_create_prize", lang=lang)
-    await query.edit_message_text(msg, parse_mode="HTML")
-    return C_PRIZE
+
+    # Ask winner count
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("1", callback_data="ctwin_1"), InlineKeyboardButton("2", callback_data="ctwin_2"), InlineKeyboardButton("3", callback_data="ctwin_3")],
+        [InlineKeyboardButton("5", callback_data="ctwin_5"), InlineKeyboardButton("10", callback_data="ctwin_10")],
+    ])
+    await query.edit_message_text(get_text("ct_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
+    return CT_WINNERS
 
 
-async def contest_prize(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def contest_winners_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle winner count and finalize contest creation."""
+    query = update.callback_query
+    await query.answer()
     lang = context.user_data.get("lang", "en")
-    text = update.message.text.strip()
-    if text.lower() == "/skip":
-        context.user_data["contest_prize"] = None
-    else:
-        context.user_data["contest_prize"] = text
-    msg = get_text("ct_create_max_subs", lang=lang)
-    await update.message.reply_text(msg, parse_mode="HTML")
-    return C_MAX_SUBMISSIONS
-
-
-async def contest_max_submissions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = context.user_data.get("lang", "en")
-    try:
-        max_subs = int(update.message.text.strip())
-        if max_subs < 1:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text(get_text("ct_invalid_number", lang=lang))
-        return C_MAX_SUBMISSIONS
-
-    context.user_data["contest_max_subs"] = max_subs
-    await update.message.reply_text(get_text("ct_create_winners", lang=lang), parse_mode="HTML")
-    return C_WINNERS
-
-
-async def contest_winner_count(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    lang = context.user_data.get("lang", "en")
-    try:
-        winner_count = int(update.message.text.strip())
-        if winner_count < 1:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text(get_text("ct_invalid_number", lang=lang))
-        return C_WINNERS
-
-    max_subs = context.user_data["contest_max_subs"]
+    winner_count = int(query.data.split("_")[1])
+    post_data = context.user_data["post_data"]
 
     async with async_session() as session:
         contest = Contest(
-            title=context.user_data["contest_title"],
-            description=context.user_data.get("contest_description"),
-            prize=context.user_data.get("contest_prize"),
+            title=context.user_data["title"],
+            post_text=post_data["post_text"],
+            post_file_id=post_data["post_file_id"],
+            post_media_type=post_data["post_media_type"],
             contest_type=context.user_data["contest_type"],
-            max_submissions_per_user=max_subs,
             winner_count=winner_count,
-            creator_id=update.effective_user.id,
-            creator_username=update.effective_user.username,
-            chat_id=update.effective_chat.id,
+            creator_id=query.from_user.id,
+            creator_username=query.from_user.username,
+            chat_id=query.message.chat_id,
         )
         session.add(contest)
         await session.commit()
         await session.refresh(contest)
-
-    type_key = f"ct_type_{contest.contest_type.value}"
-    prize_text = f"\n🎁 {get_text('ct_create_prize', lang=lang).split(chr(10))[0]}: <b>{contest.prize}</b>" if contest.prize else ""
-    desc_text = f"\n📝 {contest.description}" if contest.description else ""
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(get_text("ct_submit_button", lang=lang), callback_data=f"submit_contest_{contest.id}")],
         [InlineKeyboardButton(get_text("ct_view_button", lang=lang), callback_data=f"view_contest_{contest.id}")],
     ])
 
-    announcement = get_text(
-        "ct_announcement", lang=lang,
-        title=contest.title, description=desc_text,
-        type=get_text(type_key, lang=lang), max_subs=max_subs,
-        prize=prize_text, status=get_text("ct_status_accepting", lang=lang),
-        sub_count=0, id=contest.id,
-    )
-    await update.message.reply_text(announcement, reply_markup=keyboard, parse_mode="HTML")
+    # Delete settings message
+    try:
+        await query.delete_message()
+    except Exception:
+        pass
+
+    # Send the admin's original post with submit/view buttons
+    await _send_contest_post(context.bot, query.message.chat_id, contest, keyboard)
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -538,22 +541,15 @@ def get_contest_handlers() -> list:
     create_conv = ConversationHandler(
         entry_points=[CommandHandler("newcontest", new_contest_start)],
         states={
-            C_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, contest_title)],
-            C_DESCRIPTION: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, contest_description),
-                CommandHandler("skip", contest_description),
+            CT_POST: [
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL)
+                    & ~filters.COMMAND,
+                    contest_receive_post,
+                ),
             ],
-            C_TYPE: [CallbackQueryHandler(contest_type_selected, pattern=r"^ctype_")],
-            C_PRIZE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, contest_prize),
-                CommandHandler("skip", contest_prize),
-            ],
-            C_MAX_SUBMISSIONS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, contest_max_submissions)
-            ],
-            C_WINNERS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, contest_winner_count)
-            ],
+            CT_TYPE: [CallbackQueryHandler(contest_type_selected, pattern=r"^ctype_")],
+            CT_WINNERS: [CallbackQueryHandler(contest_winners_selected, pattern=r"^ctwin_")],
         },
         fallbacks=[CommandHandler("cancel", cancel_contest_creation)],
     )

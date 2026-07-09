@@ -460,18 +460,20 @@ async def miniapp_create_giveaway(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
 ):
-    """Create a giveaway from the Mini App form."""
+    """Create a giveaway from the Mini App (post-based)."""
     user = _get_user_from_header(x_telegram_init_data)
     user_id = user["id"]
     username = user.get("username")
 
     body = await request.json()
-    title = body.get("title", "").strip()
-    prize = body.get("prize", "").strip()
-    if not title or not prize:
-        return {"error": "Nom va sovg'a kiritilishi shart"}
+    post_text = body.get("post_text", "").strip()
+    if not post_text:
+        return {"error": "Post matni kiritilishi shart"}
 
-    description = body.get("description") or None
+    import re
+    plain = re.sub(r"<[^>]+>", "", post_text)
+    title = plain.strip().split("\n")[0][:100] or "Giveaway"
+
     winner_count = max(1, int(body.get("winner_count", 1)))
     required_channels = body.get("required_channels") or None
 
@@ -486,12 +488,10 @@ async def miniapp_create_giveaway(
         "30d": timedelta(days=30), "none": None,
     }
 
-    # Support both preset durations and custom deadlines
-    deadline_str = body.get("deadline")  # ISO datetime string from datetime-local input
+    deadline_str = body.get("deadline")
     duration_key = body.get("duration", "24h")
 
     if deadline_str:
-        # Custom deadline: parse ISO datetime
         try:
             ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
         except (ValueError, TypeError):
@@ -507,11 +507,11 @@ async def miniapp_create_giveaway(
 
     async with async_session() as session:
         giveaway = Giveaway(
-            title=title, description=description, prize=prize,
+            title=title, post_text=post_text,
             winner_count=winner_count,
             required_channels=channels_str,
             creator_id=user_id, creator_username=username,
-            chat_id=user_id,  # will be updated when posted to a channel
+            chat_id=user_id,
             ends_at=ends_at,
         )
         session.add(giveaway)
@@ -526,15 +526,19 @@ async def miniapp_create_contest(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
 ):
-    """Create a contest from the Mini App form."""
+    """Create a contest from the Mini App (post-based)."""
     user = _get_user_from_header(x_telegram_init_data)
     user_id = user["id"]
     username = user.get("username")
 
     body = await request.json()
-    title = body.get("title", "").strip()
-    if not title:
-        return {"error": "Konkurs nomi kiritilishi shart"}
+    post_text = body.get("post_text", "").strip()
+    if not post_text:
+        return {"error": "Post matni kiritilishi shart"}
+
+    import re
+    plain = re.sub(r"<[^>]+>", "", post_text)
+    title = plain.strip().split("\n")[0][:100] or "Contest"
 
     from bot.models.contest import Contest, ContestType
 
@@ -543,9 +547,7 @@ async def miniapp_create_contest(
 
     async with async_session() as session:
         contest = Contest(
-            title=title,
-            description=body.get("description") or None,
-            prize=body.get("prize") or None,
+            title=title, post_text=post_text,
             contest_type=contest_type,
             winner_count=max(1, int(body.get("winner_count", 1))),
             max_submissions_per_user=1,
@@ -1109,16 +1111,19 @@ async def miniapp_create_comment_giveaway(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
 ):
-    """Create a comment-based (group/channel) giveaway from the Mini App."""
+    """Create a comment-based (group/channel) giveaway from the Mini App (post-based)."""
     user = _get_user_from_header(x_telegram_init_data)
     user_id = user["id"]
     username = user.get("username")
 
     body = await request.json()
-    title = body.get("title", "").strip()
-    prize = body.get("prize", "").strip()
-    if not title or not prize:
-        return {"error": "Nom va sovg'a kiritilishi shart"}
+    post_text = body.get("post_text", "").strip()
+    if not post_text:
+        return {"error": "Post matni kiritilishi shart"}
+
+    import re
+    plain = re.sub(r"<[^>]+>", "", post_text)
+    title = plain.strip().split("\n")[0][:100] or "Group Giveaway"
 
     from bot.models.group_giveaway import GroupGiveaway, GroupGiveawayMode
     from bot.utils.subscription import serialize_channels, parse_channels as _pc
@@ -1164,16 +1169,14 @@ async def miniapp_create_comment_giveaway(
 
     async with async_session() as session:
         gw = GroupGiveaway(
-            title=title,
-            prize=prize,
-            description=body.get("description") or None,
+            title=title, post_text=post_text,
             winner_count=max(1, int(body.get("winner_count", 1))),
             mode=mode,
             keyword=keyword,
             required_channels=channels_str,
             creator_id=user_id,
             creator_username=username,
-            chat_id=user_id,  # placeholder — set when posted to group/channel
+            chat_id=user_id,
             ends_at=ends_at,
             is_channel_post=False,
         )
