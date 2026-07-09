@@ -7,6 +7,7 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, Mes
 
 from bot.i18n import SUPPORTED_LANGUAGES, get_text
 from bot.config import settings
+from bot.models.database import async_session
 from bot.utils.lang import get_user_lang, set_user_lang, t
 from bot.utils.referral import parse_referral_payload, process_referral
 from bot.handlers.captcha_handler import is_user_verified
@@ -21,19 +22,19 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
             ["🎲 Yutuqli o'yin yaratish", "📋 Mening o'yinlarim"],
             ["🏅 Konkurs yaratish", "🏆 Reyting"],
             ["👥 Do'st taklif qilish", "🚪 So'rovlarni boshqarish"],
-            ["⚙️ Sozlamalar"],
+            ["⚙️ Sozlamalar", "🐛 Xatolik xabar qilish"],
         ],
         "ru": [
             ["🎲 Создать розыгрыш", "📋 Мои розыгрыши"],
             ["🏅 Создать конкурс", "🏆 Рейтинг"],
             ["👥 Пригласить друга", "🚪 Управление заявками"],
-            ["⚙️ Настройки"],
+            ["⚙️ Настройки", "🐛 Сообщить об ошибке"],
         ],
         "en": [
             ["🎲 Create Giveaway", "📋 My Giveaways"],
             ["🏅 Create Contest", "🏆 Leaderboard"],
             ["👥 Invite Friends", "🚪 Join Requests"],
-            ["⚙️ Settings"],
+            ["⚙️ Settings", "🐛 Report Bug"],
         ],
     }
     buttons = menus.get(lang, menus["uz"])
@@ -65,6 +66,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Build welcome message with inline buttons
     text = await t("welcome", user_id)
+
+    # Add test mode banner
+    test_banners = {
+        "uz": "\n\n⚠️ <i>Bot sinov rejimida ishlamoqda. Xatolik ko'rsangiz, pastdagi \"🐛 Xatolik xabar qilish\" tugmasini bosing.</i>",
+        "ru": "\n\n⚠️ <i>Бот работает в тестовом режиме. Если заметите ошибку, нажмите \"🐛 Сообщить об ошибке\" ниже.</i>",
+        "en": "\n\n⚠️ <i>Bot is in test mode. If you see any errors, tap \"🐛 Report Bug\" below.</i>",
+    }
+    text += test_banners.get(lang, test_banners["uz"])
 
     # Inline buttons: language selector + Mini App (if configured)
     inline_buttons = []
@@ -300,6 +309,41 @@ async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await open_miniapp_tab(update, context, "profile")
     else:
         await lang_command(update, context)
+
+
+async def menu_report_bug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🐛 Report Bug' button tap — ask user to describe the issue."""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    texts = {
+        "uz": (
+            "🐛 <b>Xatolik xabar qilish</b>\n\n"
+            "Bot hozir <b>sinov rejimida</b> ishlamoqda. "
+            "Xatolik yoki muammo ko'rsangiz, iltimos, quyida yozing:\n\n"
+            "• Nima qilayotgan edingiz?\n"
+            "• Qanday xatolik yuz berdi?\n\n"
+            "💬 <i>Xabaringizni hozir yozing — admin ko'rib chiqadi.</i>"
+        ),
+        "ru": (
+            "🐛 <b>Сообщить об ошибке</b>\n\n"
+            "Бот сейчас работает в <b>тестовом режиме</b>. "
+            "Если вы заметили ошибку, напишите ниже:\n\n"
+            "• Что вы делали?\n"
+            "• Что произошло не так?\n\n"
+            "💬 <i>Напишите ваше сообщение — админ рассмотрит.</i>"
+        ),
+        "en": (
+            "🐛 <b>Report a Bug</b>\n\n"
+            "The bot is currently in <b>test mode</b>. "
+            "If you noticed any issue, please describe below:\n\n"
+            "• What were you doing?\n"
+            "• What went wrong?\n\n"
+            "💬 <i>Type your message now — admin will review it.</i>"
+        ),
+    }
+    await update.message.reply_text(texts.get(lang, texts["uz"]), parse_mode="HTML")
+    context.user_data["awaiting_bug_report"] = True
 
 
 async def menu_joinfilter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -653,6 +697,47 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
         await jf_receive_channel(update, context)
         return
 
+    # Bug report: save user's message as feedback
+    if context.user_data.get("awaiting_bug_report"):
+        context.user_data.pop("awaiting_bug_report", None)
+        text = update.message.text or update.message.caption or ""
+        if text.strip():
+            user = update.effective_user
+            # Save to DB as feedback
+            try:
+                from bot.models.moderation import ContentFlag
+                async with async_session() as session:
+                    flag = ContentFlag(
+                        user_id=user.id,
+                        content_type="feedback_bug",
+                        content_text=f"[bug_report] @{user.username or user.id}: {text[:1500]}",
+                        reason="bug",
+                    )
+                    session.add(flag)
+                    await session.commit()
+            except Exception as e:
+                logger.warning("Failed to save bug report: %s", e)
+
+            # Notify admins
+            for admin_id in settings.ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        admin_id,
+                        f"🐛 <b>Bug report</b> from @{user.username or ''} (ID: {user.id}):\n\n{text[:500]}",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+
+            lang = await get_user_lang(user.id)
+            thanks = {
+                "uz": "✅ Rahmat! Xabaringiz adminga yuborildi. Tez orada ko'rib chiqiladi.",
+                "ru": "✅ Спасибо! Ваше сообщение отправлено админу.",
+                "en": "✅ Thank you! Your report has been sent to the admin.",
+            }
+            await update.message.reply_text(thanks.get(lang, thanks["uz"]))
+        return
+
     if not context.user_data.get("awaiting_captcha"):
         return  # Not waiting for captcha — let other handlers process this
 
@@ -771,6 +856,7 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
         MessageHandler(filters.Regex(r"^(🚪 So'rovlarni boshqarish|🚪 Управление заявками|🚪 Join Requests|🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),
         MessageHandler(filters.Regex(r"^(⚙️ Sozlamalar|⚙️ Настройки|⚙️ Settings)$"), menu_settings),
+        MessageHandler(filters.Regex(r"^(🐛 Xatolik xabar qilish|🐛 Сообщить об ошибке|🐛 Report Bug)$"), menu_report_bug),
     ]
 
 

@@ -36,6 +36,44 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def error_handler(update: object, context) -> None:
+    """Global error handler — logs the error and notifies the user."""
+    logger.error("Unhandled exception:", exc_info=context.error)
+
+    # Try to notify the user
+    if update and hasattr(update, "effective_user") and update.effective_user:
+        user_id = update.effective_user.id
+        try:
+            from bot.utils.lang import get_user_lang
+            lang = await get_user_lang(user_id)
+        except Exception:
+            lang = "uz"
+
+        error_msgs = {
+            "uz": "⚠️ Kechirasiz, kutilmagan xatolik yuz berdi.\n\n🐛 Agar muammo davom etsa, \"🐛 Xatolik xabar qilish\" tugmasini bosing.",
+            "ru": "⚠️ Произошла непредвиденная ошибка.\n\n🐛 Если проблема повторяется, нажмите \"🐛 Сообщить об ошибке\".",
+            "en": "⚠️ An unexpected error occurred.\n\n🐛 If the problem persists, tap \"🐛 Report Bug\".",
+        }
+        try:
+            if hasattr(update, "effective_chat") and update.effective_chat:
+                await context.bot.send_message(
+                    update.effective_chat.id,
+                    error_msgs.get(lang, error_msgs["uz"]),
+                )
+        except Exception:
+            pass
+
+    # Notify admins with error details
+    import traceback
+    tb = "".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__))
+    error_text = f"🚨 <b>Bot Error</b>\n\n<pre>{tb[:3000]}</pre>"
+    for admin_id in settings.ADMIN_IDS:
+        try:
+            await context.bot.send_message(admin_id, error_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+
 async def post_init(application: Application) -> None:
     """Initialize database, set bot commands, and schedule jobs."""
     logger.info("Initializing database...")
@@ -197,6 +235,9 @@ def main() -> None:
     # CAPTCHA answer handler in group 1 (lower priority than all other handlers)
     # This ensures it only catches messages when no other handler matched
     application.add_handler(get_captcha_answer_handler(), group=1)
+
+    # Global error handler — catches unhandled exceptions, notifies user + admin
+    application.add_error_handler(error_handler)
 
     # allowed_updates must include message reactions so REACTION-mode
     # giveaways can capture emoji reactions on posts.
