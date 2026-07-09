@@ -63,6 +63,19 @@ if ! systemctl is-active --quiet caddy; then
     sudo systemctl start caddy
 fi
 
+# ─── Run database migrations ──────────────────────────────
+if [ -d "migrations" ]; then
+    echo "🗄  Running database migrations..."
+    for sql_file in migrations/*.sql; do
+        [ -f "$sql_file" ] || continue
+        echo "   → $sql_file"
+        psql "$DATABASE_URL" -f "$sql_file" 2>/dev/null || \
+        psql -f "$sql_file" 2>/dev/null || \
+        echo "   ⚠️  Could not run $sql_file (check DB connection)"
+    done
+    echo "   Done."
+fi
+
 # ─── Helper: start bot + web ──────────────────────────────
 start_services() {
     echo "🌍 Starting web server (port 8080)..."
@@ -158,6 +171,14 @@ auto_updater() {
             continue
         fi
 
+        # Run migrations if any new .sql files
+        if [ -d "migrations" ]; then
+            for sql_file in migrations/*.sql; do
+                [ -f "$sql_file" ] || continue
+                psql "$DATABASE_URL" -f "$sql_file" >> "$LOG_FILE" 2>&1 || true
+            done
+        fi
+
         # Stop services
         echo "[$(date)] Stopping services for restart..." >> "$LOG_FILE"
         stop_services
@@ -182,6 +203,14 @@ trigger_watcher() {
             cd "$SCRIPT_DIR"
             git_output=$(git pull origin "$GIT_BRANCH" 2>&1)
             echo "[$(date)] git pull: $git_output" >> "$LOG_FILE"
+
+            # Run migrations
+            if [ -d "migrations" ]; then
+                for sql_file in migrations/*.sql; do
+                    [ -f "$sql_file" ] || continue
+                    psql "$DATABASE_URL" -f "$sql_file" >> "$LOG_FILE" 2>&1 || true
+                done
+            fi
 
             # Restart services (even if no changes — admin wants a restart)
             echo "[$(date)] Stopping services for manual restart..." >> "$LOG_FILE"
