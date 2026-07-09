@@ -81,6 +81,34 @@ async def post_init(application: Application) -> None:
     await init_db()
     logger.info("Database initialized successfully (PostgreSQL).")
 
+    # ─── Auto-run pending migrations via SQLAlchemy (no psql needed) ───────
+    try:
+        from sqlalchemy import text as sql_text
+        from bot.models.database import async_session
+        async with async_session() as session:
+            migrations = [
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
+                "ALTER TABLE giveaways ALTER COLUMN prize DROP NOT NULL",
+                "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
+                "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
+                "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
+                "ALTER TABLE group_giveaways ALTER COLUMN prize DROP NOT NULL",
+                "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_text TEXT",
+                "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
+                "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
+            ]
+            for stmt in migrations:
+                try:
+                    await session.execute(sql_text(stmt))
+                except Exception:
+                    pass  # Column may already exist or table may not exist yet
+            await session.commit()
+        logger.info("Database migrations applied.")
+    except Exception as e:
+        logger.warning("Migration step failed (non-fatal): %s", e)
+
     # Load active group giveaway posts into memory
     await _load_active_giveaways()
     logger.info("Loaded active group giveaway posts.")
