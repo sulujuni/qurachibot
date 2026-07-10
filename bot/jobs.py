@@ -93,7 +93,7 @@ async def publish_queued_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
             async with async_session() as session:
                 result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
                 g = result.scalar_one()
-                g.status = GiveawayStatus.ACTIVE
+                g.status = "active"
                 g.published_at = now
                 g.message_id = msg.message_id
                 if not g.channel_id:
@@ -129,7 +129,7 @@ async def publish_queued_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
             async with async_session() as session:
                 result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
                 g = result.scalar_one()
-                g.status = GiveawayStatus.CANCELLED
+                g.status = "cancelled"
                 await session.commit()
 
 
@@ -144,7 +144,7 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
             select(Giveaway)
             .options(selectinload(Giveaway.participants))
             .where(
-                Giveaway.status == GiveawayStatus.ACTIVE,
+                Giveaway.status == "active",
                 Giveaway.ends_at <= now,
                 Giveaway.ends_at != None,
             )
@@ -153,7 +153,7 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         for giveaway in expired_giveaways:
             if not giveaway.participants:
-                giveaway.status = GiveawayStatus.COMPLETED
+                giveaway.status = "completed"
                 giveaway.drawn_at = now
                 await session.commit()
                 # Announce "no winners" in channel
@@ -191,7 +191,7 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
                 session.add(gw_winner)
 
-            giveaway.status = GiveawayStatus.COMPLETED
+            giveaway.status = "completed"
             giveaway.drawn_at = now
             await session.commit()
 
@@ -387,7 +387,7 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             select(Giveaway)
             .options(selectinload(Giveaway.participants))
             .where(
-                Giveaway.status == GiveawayStatus.ACTIVE,
+                Giveaway.status == "active",
                 Giveaway.ends_at <= reminder_window,
                 Giveaway.ends_at > now,
             )
@@ -440,7 +440,7 @@ async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
         result = await session.execute(
             select(Giveaway).where(
                 Giveaway.created_at >= since,
-                Giveaway.status == GiveawayStatus.ACTIVE,
+                Giveaway.status == "active",
                 Giveaway.is_test == False,
             )
         )

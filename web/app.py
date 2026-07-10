@@ -51,10 +51,10 @@ async def dashboard(request: Request):
         # Giveaway stats
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar()
         gw_active = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "active")
         )).scalar()
         gw_completed = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.COMPLETED)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "completed")
         )).scalar()
         total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar()
         total_winners = (await session.execute(select(func.count(GiveawayWinner.id)))).scalar()
@@ -129,7 +129,7 @@ async def api_stats():
     async with async_session() as session:
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar()
         gw_active = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "active")
         )).scalar()
         total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar()
         ct_total = (await session.execute(select(func.count(Contest.id)))).scalar()

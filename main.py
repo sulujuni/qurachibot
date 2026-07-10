@@ -88,6 +88,9 @@ async def post_init(application: Application) -> None:
         from bot.models.database import async_session
         async with async_session() as session:
             migrations = [
+                # Convert status from ENUM to VARCHAR (one-time, safe to re-run)
+                "ALTER TABLE giveaways ALTER COLUMN status TYPE VARCHAR(20) USING status::text",
+                "ALTER TABLE giveaways ALTER COLUMN status SET DEFAULT 'active'",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
@@ -96,9 +99,6 @@ async def post_init(application: Application) -> None:
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS message_id BIGINT",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS scheduled_start TIMESTAMP",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS published_at TIMESTAMP",
-                # Add new enum values for draft/queued states (safe to run multiple times)
-                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'draft' AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'giveawaystatus')) THEN ALTER TYPE giveawaystatus ADD VALUE 'draft'; END IF; END $$",
-                "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_enum WHERE enumlabel = 'queued' AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'giveawaystatus')) THEN ALTER TYPE giveawaystatus ADD VALUE 'queued'; END IF; END $$",
                 "ALTER TABLE giveaways ALTER COLUMN prize DROP NOT NULL",
                 "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
                 "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",

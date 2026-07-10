@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base
@@ -27,9 +27,7 @@ class Giveaway(Base):
     description: Mapped[str] = mapped_column(Text, nullable=True)
     prize: Mapped[str] = mapped_column(String(500), nullable=True)
     winner_count: Mapped[int] = mapped_column(Integer, default=1)
-    status: Mapped[GiveawayStatus] = mapped_column(
-        Enum(GiveawayStatus), default=GiveawayStatus.DRAFT
-    )
+    status: Mapped[str] = mapped_column(String(20), default="draft")
     # Comma-separated list of channels users must join to participate (forced-sub)
     required_channels: Mapped[str] = mapped_column(Text, nullable=True)
 

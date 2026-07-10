@@ -393,7 +393,7 @@ async def _finalize_full_giveaway(query, context) -> int:
     scheduled_start = context.user_data.get("scheduled_start")
     sub_channels = context.user_data.get("sub_channels_list", [])
     channels_str = ",".join(sub_channels) if sub_channels else None
-    status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
+    status = "queued" if scheduled_start else "active"
 
     async with async_session() as session:
         giveaway = Giveaway(
@@ -484,7 +484,7 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
             await query.answer(get_text("gw_not_found", lang=lang), show_alert=True)
             return
 
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             await query.answer(get_text("gw_ended", lang=lang), show_alert=True)
             return
 
@@ -568,7 +568,7 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             result = await session.execute(
                 select(Giveaway).where(
                     Giveaway.creator_id == user_id,
-                    Giveaway.status == GiveawayStatus.ACTIVE,
+                    Giveaway.status == "active",
                 )
             )
             giveaways = result.scalars().all()
@@ -604,13 +604,13 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text(get_text("gw_only_creator", lang=lang))
             return
 
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             await update.message.reply_text(get_text("gw_not_active", lang=lang))
             return
 
         participants = giveaway.participants
         if not participants:
-            giveaway.status = GiveawayStatus.COMPLETED
+            giveaway.status = "completed"
             giveaway.drawn_at = datetime.utcnow()
             await session.commit()
             await update.message.reply_text(get_text("gw_no_participants", lang=lang))
@@ -634,7 +634,7 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
             session.add(gw_winner)
 
-        giveaway.status = GiveawayStatus.COMPLETED
+        giveaway.status = "completed"
         giveaway.drawn_at = datetime.utcnow()
         await session.commit()
 
@@ -745,7 +745,7 @@ async def edit_giveaway_command(update: Update, context: ContextTypes.DEFAULT_TY
             result = await session.execute(
                 select(Giveaway).where(
                     Giveaway.creator_id == user_id,
-                    Giveaway.status.in_([GiveawayStatus.DRAFT, GiveawayStatus.QUEUED, GiveawayStatus.ACTIVE]),
+                    Giveaway.status.in_(["draft", "queued", "active"]),
                 )
             )
             giveaways = result.scalars().all()
@@ -769,7 +769,7 @@ async def edit_giveaway_command(update: Update, context: ContextTypes.DEFAULT_TY
     if not giveaway or giveaway.creator_id != user_id:
         await update.message.reply_text("❌ Topilmadi yoki sizniki emas.")
         return
-    if giveaway.status == GiveawayStatus.COMPLETED or giveaway.status == GiveawayStatus.CANCELLED:
+    if giveaway.status == "completed" or giveaway.status == "cancelled":
         await update.message.reply_text("❌ Tugagan o'yinni tahrir qilib bo'lmaydi.")
         return
 
@@ -939,8 +939,8 @@ async def _show_my_giveaway_page(bot, chat_id, user_id, page, lang, edit_message
     total = len(giveaways)
 
     status_emoji = {
-        GiveawayStatus.DRAFT: "📝", GiveawayStatus.QUEUED: "⏳",
-        GiveawayStatus.ACTIVE: "🟢", GiveawayStatus.COMPLETED: "✅", GiveawayStatus.CANCELLED: "❌",
+        "draft": "📝", "queued": "⏳",
+        "active": "🟢", "completed": "✅", "cancelled": "❌",
     }
     emoji = status_emoji.get(gw.status, "❓")
     p_count = len(gw.participants)
@@ -968,10 +968,10 @@ async def _show_my_giveaway_page(bot, chat_id, user_id, page, lang, edit_message
         nav_buttons.append(InlineKeyboardButton("➡️", callback_data=f"mygw_next_{page}"))
 
     action_buttons = []
-    if gw.status == GiveawayStatus.ACTIVE:
+    if gw.status == "active":
         action_buttons.append(InlineKeyboardButton("🎲 Qur'a", callback_data=f"mygw_draw_{gw.id}"))
         action_buttons.append(InlineKeyboardButton("❌ Bekor", callback_data=f"mygw_cancel_{gw.id}"))
-    if gw.status in (GiveawayStatus.DRAFT, GiveawayStatus.QUEUED, GiveawayStatus.ACTIVE):
+    if gw.status in ("draft", "queued", "active"):
         action_buttons.append(InlineKeyboardButton("✏️ Tahrir", callback_data=f"mygw_edit_{gw.id}"))
 
     rows = [nav_buttons]
@@ -1019,7 +1019,7 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
                 select(Giveaway).options(selectinload(Giveaway.participants)).where(Giveaway.id == giveaway_id)
             )
             giveaway = result.scalar_one_or_none()
-            if not giveaway or giveaway.creator_id != user_id or giveaway.status != GiveawayStatus.ACTIVE:
+            if not giveaway or giveaway.creator_id != user_id or giveaway.status != "active":
                 await query.answer("❌", show_alert=True)
                 return
             if not giveaway.participants:
@@ -1029,7 +1029,7 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
             winners = random.sample(list(giveaway.participants), winner_count)
             for w in winners:
                 session.add(GiveawayWinner(giveaway_id=giveaway_id, user_id=w.user_id, username=w.username, first_name=w.first_name))
-            giveaway.status = GiveawayStatus.COMPLETED
+            giveaway.status = "completed"
             giveaway.drawn_at = datetime.utcnow()
             await session.commit()
 
@@ -1055,8 +1055,8 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
         async with async_session() as session:
             result = await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
             gw = result.scalar_one_or_none()
-            if gw and gw.creator_id == user_id and gw.status in (GiveawayStatus.ACTIVE, GiveawayStatus.QUEUED, GiveawayStatus.DRAFT):
-                gw.status = GiveawayStatus.CANCELLED
+            if gw and gw.creator_id == user_id and gw.status in ("active", "queued", "draft"):
+                gw.status = "cancelled"
                 await session.commit()
         await query.answer("❌ Bekor qilindi")
         page = context.user_data.get("mygw_page", 0)
@@ -1261,11 +1261,11 @@ async def cancel_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await update.message.reply_text(get_text("gw_cancel_only_creator", lang=lang))
             return
 
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             await update.message.reply_text(get_text("gw_cancel_not_active", lang=lang))
             return
 
-        giveaway.status = GiveawayStatus.CANCELLED
+        giveaway.status = "cancelled"
         await session.commit()
 
     text = get_text("gw_cancel_done", lang=lang, title=giveaway.title)
@@ -1301,7 +1301,7 @@ async def notify_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             result = await session.execute(
                 select(Giveaway).where(
                     Giveaway.creator_id == user_id,
-                    Giveaway.status == GiveawayStatus.ACTIVE,
+                    Giveaway.status == "active",
                 )
             )
             giveaways = result.scalars().all()

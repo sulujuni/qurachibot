@@ -167,7 +167,7 @@ async def get_giveaway_info(
 
         # Winners text (if completed)
         winners_text = ""
-        if giveaway.status == GiveawayStatus.COMPLETED:
+        if giveaway.status == "completed":
             winners_result = await session.execute(
                 select(GiveawayWinner).where(GiveawayWinner.giveaway_id == giveaway_id)
             )
@@ -213,7 +213,7 @@ async def join_giveaway(
         if not giveaway:
             return {"error": "O'yin topilmadi"}
 
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             return {"error": "Bu o'yin tugagan"}
 
         if giveaway.ends_at and datetime.utcnow() > giveaway.ends_at:
@@ -311,7 +311,7 @@ async def miniapp_stats():
     async with async_session() as session:
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar() or 0
         gw_active = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "active")
         )).scalar() or 0
         total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar() or 0
         unique_users = (await session.execute(
@@ -337,7 +337,7 @@ async def miniapp_active_giveaways():
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway)
-            .where(Giveaway.status == GiveawayStatus.ACTIVE)
+            .where(Giveaway.status == "active")
             .order_by(Giveaway.created_at.desc())
             .limit(20)
         )
@@ -575,7 +575,7 @@ async def miniapp_create_giveaway(
             ch = str(channel_id_val).strip()
             parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
 
-        gw_status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
+        gw_status = GiveawayStatus.QUEUED if scheduled_start else "active"
 
         giveaway = Giveaway(
             title=title, post_text=post_text,
@@ -862,7 +862,7 @@ async def miniapp_create_contest(
             ch = str(channel_id_val).strip()
             parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
 
-        gw_status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
+        gw_status = GiveawayStatus.QUEUED if scheduled_start else "active"
 
         async with async_session() as session:
             giveaway = Giveaway(
@@ -977,7 +977,7 @@ async def admin_draw_giveaway(
         giveaway = result.scalar_one_or_none()
         if not giveaway:
             return {"error": "Topilmadi"}
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             return {"error": "Bu o'yin faol emas"}
 
         # Get participants
@@ -999,7 +999,7 @@ async def admin_draw_giveaway(
                 user_id=w.user_id, username=w.username, first_name=w.first_name,
             ))
 
-        giveaway.status = GiveawayStatus.COMPLETED
+        giveaway.status = "completed"
         giveaway.drawn_at = datetime.utcnow()
         await session.commit()
 
@@ -1024,10 +1024,10 @@ async def admin_cancel_giveaway(
         giveaway = result.scalar_one_or_none()
         if not giveaway:
             return {"error": "Topilmadi"}
-        if giveaway.status != GiveawayStatus.ACTIVE:
+        if giveaway.status != "active":
             return {"error": "Bu o'yin faol emas"}
 
-        giveaway.status = GiveawayStatus.CANCELLED
+        giveaway.status = "cancelled"
         await session.commit()
 
     return {"success": True}
@@ -1048,10 +1048,10 @@ async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
     async with async_session() as session:
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar() or 0
         gw_active = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "active")
         )).scalar() or 0
         gw_completed = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.COMPLETED)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "completed")
         )).scalar() or 0
         total_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar() or 0
         total_winners = (await session.execute(select(func.count(GiveawayWinner.id)))).scalar() or 0
