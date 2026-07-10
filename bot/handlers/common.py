@@ -19,22 +19,22 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
     """Build the main menu reply keyboard based on language."""
     menus = {
         "uz": [
-            ["🎲 Yutuqli o'yin yaratish", "📋 Mening o'yinlarim"],
-            ["🏅 Konkurs yaratish", "🏆 Reyting"],
-            ["👥 Do'st taklif qilish", "🚪 So'rovlarni boshqarish"],
-            ["⚙️ Sozlamalar", "🐛 Xatolik xabar qilish"],
+            ["🎲 O'yin yaratish", "📋 Mening o'yinlarim"],
+            ["🏆 Reyting", "👥 Do'st taklif qilish"],
+            ["🚪 So'rovlarni boshqarish", "⚙️ Sozlamalar"],
+            ["🐛 Xatolik xabar qilish"],
         ],
         "ru": [
-            ["🎲 Создать розыгрыш", "📋 Мои розыгрыши"],
-            ["🏅 Создать конкурс", "🏆 Рейтинг"],
-            ["👥 Пригласить друга", "🚪 Управление заявками"],
-            ["⚙️ Настройки", "🐛 Сообщить об ошибке"],
+            ["🎲 Создать игру", "📋 Мои игры"],
+            ["🏆 Рейтинг", "👥 Пригласить друга"],
+            ["🚪 Управление заявками", "⚙️ Настройки"],
+            ["🐛 Сообщить об ошибке"],
         ],
         "en": [
-            ["🎲 Create Giveaway", "📋 My Giveaways"],
-            ["🏅 Create Contest", "🏆 Leaderboard"],
-            ["👥 Invite Friends", "🚪 Join Requests"],
-            ["⚙️ Settings", "🐛 Report Bug"],
+            ["🎲 Create Game", "📋 My Games"],
+            ["🏆 Leaderboard", "👥 Invite Friends"],
+            ["🚪 Join Requests", "⚙️ Settings"],
+            ["🐛 Report Bug"],
         ],
     }
     buttons = menus.get(lang, menus["uz"])
@@ -849,8 +849,8 @@ def get_common_handlers() -> list:
         CallbackQueryHandler(jf_setup_start_callback, pattern=r"^jf_setup_start$"),
         CallbackQueryHandler(jf_mode_selected_callback, pattern=r"^jf_mode_"),
         # Reply keyboard button handlers (all 3 languages)
-        MessageHandler(filters.Regex(r"^(🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
-        MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
+        MessageHandler(filters.Regex(r"^(🎲 O'yin yaratish|🎲 Создать игру|🎲 Create Game|🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
+        MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои игры|📋 My Games|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
         MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
         MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),

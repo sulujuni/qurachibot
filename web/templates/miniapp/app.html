@@ -1088,7 +1088,7 @@ async function renderLeaders() {
 
 <script>
 // ─── CREATE TAB ────────────────────────────────────────────────
-let createType = 'giveaway';
+let createType = 'comment';
 
 function durationOptions() {
     return `
@@ -1114,7 +1114,6 @@ function renderCreate() {
         <div class="card-title"><span class="ci">${ic('plus')}</span>${t('create_title')}</div>
         <p style="font-size:12.5px;color:var(--text-hint);margin-bottom:14px;">${t('create_desc')}</p>
         <div class="chip-row">
-            <span class="chip ${createType==='giveaway'?'selected':''}" onclick="setCreateType('giveaway')">${ic('dice',15)} ${t('btn_giveaway')}</span>
             <span class="chip ${createType==='comment'?'selected':''}" onclick="setCreateType('comment')">${ic('message',15)} ${t('comment_giveaway')}</span>
             <span class="chip ${createType==='contest'?'selected':''}" onclick="setCreateType('contest')">${ic('medal',15)} ${t('contest')}</span>
         </div>
@@ -1136,26 +1135,7 @@ function renderCreateForm() {
         currentLang === 'ru' ? '📷 Для поста с фото/видео отправьте /newgiveaway, /groupgiveaway или /newcontest боту.' :
         '📷 For posts with photos/videos, send /newgiveaway, /groupgiveaway or /newcontest to the bot.';
 
-    if (createType === 'giveaway') {
-        f.innerHTML = `
-        <div class="info-box">
-            <b>${t('btn_giveaway')}</b><br>${t('gw_desc_btn')}
-        </div>
-        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
-            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
-            <div class="form-hint">${mediaHint}</div></div>
-        <div class="form-group"><label class="form-label">${t('f_winners')}</label>
-            <input class="form-input" id="cWinners" type="number" value="1" min="1"></div>
-        <div class="form-group"><label class="form-label">${t('f_duration')}</label>
-            <select class="form-select" id="cDuration">${durationOptions()}</select></div>
-        <div class="form-group hidden" id="gwDeadlineBox"><label class="form-label">${t('f_deadline')}</label>
-            <input class="form-input" id="cDeadline" type="datetime-local">
-            <div class="form-hint">${t('f_deadline_hint')}</div></div>
-        <div class="form-group"><label class="form-label">${t('f_channels')}</label>
-            <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
-            <div class="form-hint">${t('f_channels_hint')}</div></div>
-        <button class="btn btn-primary" onclick="submitGiveaway()">${ic('dice',18)} ${t('create_btn')}</button>`;
-    } else if (createType === 'comment') {
+    if (createType === 'comment') {
         f.innerHTML = `
         <div class="info-box">
             <b>${t('comment_giveaway')}</b><br>${t('gw_desc_cmt')}
@@ -1191,6 +1171,8 @@ function renderCreateForm() {
             if (sel) sel.onchange = () => kwGroup.classList.toggle('hidden', sel.value !== 'keyword');
         }, 50);
     } else {
+        const addBtnLabel = currentLang === 'uz' ? "Tugma qo'shish (Qatnashish)" :
+            currentLang === 'ru' ? 'Добавить кнопку (Участвовать)' : 'Add Join button';
         f.innerHTML = `
         <div class="info-box">
             <b>${t('contest')}</b><br>${t('gw_desc_ct')}
@@ -1206,6 +1188,18 @@ function renderCreateForm() {
             </select></div>
         <div class="form-group"><label class="form-label">${t('f_winners')}</label>
             <input class="form-input" id="cWinners" type="number" value="1" min="1"></div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="cAddJoinBtn" style="width:20px;height:20px;flex-shrink:0;">
+            <label for="cAddJoinBtn" style="font-size:13px;font-weight:600;cursor:pointer;">${addBtnLabel}</label>
+        </div>
+        <div class="form-group"><label class="form-label">${t('f_duration')}</label>
+            <select class="form-select" id="cDuration">${durationOptions()}</select></div>
+        <div class="form-group hidden" id="gwDeadlineBox"><label class="form-label">${t('f_deadline')}</label>
+            <input class="form-input" id="cDeadline" type="datetime-local">
+            <div class="form-hint">${t('f_deadline_hint')}</div></div>
+        <div class="form-group"><label class="form-label">${t('f_channels')}</label>
+            <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
+            <div class="form-hint">${t('f_channels_hint')}</div></div>
         <button class="btn btn-primary" onclick="submitContest()">${ic('medal',18)} ${t('create_btn')}</button>`;
     }
 }
@@ -1230,33 +1224,6 @@ function renderBroadcastForm() {
 
 
 <script>
-async function submitGiveaway() {
-    const postText = document.getElementById('cPostText').value.trim();
-    if (!postText) { showToast(t('f_post_required'), 'error'); return; }
-
-    const durVal = document.getElementById('cDuration').value;
-    let duration = durVal;
-    let deadline = null;
-    if (durVal === 'custom') {
-        deadline = document.getElementById('cDeadline').value;
-        if (!deadline) { showToast("Tugash vaqtini kiriting!", 'error'); return; }
-        duration = null;
-    }
-
-    const body = {
-        post_text: postText,
-        winner_count: parseInt(document.getElementById('cWinners').value) || 1,
-        duration: duration,
-        deadline: deadline,
-        required_channels: document.getElementById('cChannels').value.trim() || null,
-    };
-    const res = await api('/create-giveaway', 'POST', body);
-    if (res.error) { showToast(res.error, 'error'); return; }
-    showToast(t('gw_created_success'));
-    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-    switchTab('home');
-}
-
 async function submitCommentGiveaway() {
     const postText = document.getElementById('cPostText').value.trim();
     if (!postText) { showToast(t('f_post_required'), 'error'); return; }
@@ -1290,10 +1257,25 @@ async function submitCommentGiveaway() {
 async function submitContest() {
     const postText = document.getElementById('cPostText').value.trim();
     if (!postText) { showToast(t('f_post_required'), 'error'); return; }
+
+    const addJoinBtn = document.getElementById('cAddJoinBtn')?.checked || false;
+    const durVal = document.getElementById('cDuration')?.value;
+    let duration = durVal || 'none';
+    let deadline = null;
+    if (durVal === 'custom') {
+        deadline = document.getElementById('cDeadline')?.value;
+        if (!deadline) { showToast("Tugash vaqtini kiriting!", 'error'); return; }
+        duration = null;
+    }
+
     const body = {
         post_text: postText,
         contest_type: document.getElementById('cContestType').value,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+        add_join_button: addJoinBtn,
+        duration: duration,
+        deadline: deadline,
+        required_channels: document.getElementById('cChannels')?.value.trim() || null,
     };
     const res = await api('/create-contest', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }

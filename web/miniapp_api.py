@@ -526,7 +526,7 @@ async def miniapp_create_contest(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
 ):
-    """Create a contest from the Mini App (post-based)."""
+    """Create a contest from the Mini App (post-based, with optional Join button)."""
     user = _get_user_from_header(x_telegram_init_data)
     user_id = user["id"]
     username = user.get("username")
@@ -545,6 +545,31 @@ async def miniapp_create_contest(
     type_map = {"text": ContestType.TEXT, "photo": ContestType.PHOTO, "any": ContestType.ANY}
     contest_type = type_map.get(body.get("contest_type", "any"), ContestType.ANY)
 
+    add_join_button = body.get("add_join_button", False)
+
+    # Parse duration
+    duration_map = {
+        "30m": timedelta(minutes=30), "1h": timedelta(hours=1), "3h": timedelta(hours=3),
+        "6h": timedelta(hours=6), "12h": timedelta(hours=12), "24h": timedelta(hours=24),
+        "2d": timedelta(days=2), "3d": timedelta(days=3), "5d": timedelta(days=5),
+        "7d": timedelta(days=7), "14d": timedelta(days=14), "30d": timedelta(days=30), "none": None,
+    }
+    deadline_str = body.get("deadline")
+    duration_key = body.get("duration", "none")
+    ends_at = None
+    if deadline_str:
+        try:
+            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+    elif duration_key and duration_key not in ("none", "custom"):
+        duration = duration_map.get(duration_key)
+        ends_at = datetime.utcnow() + duration if duration else None
+
+    from bot.utils.subscription import serialize_channels, parse_channels as _pc
+    raw_channels = body.get("required_channels")
+    channels_str = serialize_channels(_pc(raw_channels)) if raw_channels else None
+
     async with async_session() as session:
         contest = Contest(
             title=title, post_text=post_text,
@@ -553,12 +578,29 @@ async def miniapp_create_contest(
             max_submissions_per_user=1,
             creator_id=user_id, creator_username=username,
             chat_id=user_id,
+            submissions_end_at=ends_at,
         )
         session.add(contest)
         await session.commit()
         await session.refresh(contest)
 
-    return {"success": True, "id": contest.id, "title": contest.title}
+    # If add_join_button is True, also create a Giveaway linked to this contest
+    giveaway_id = None
+    if add_join_button:
+        async with async_session() as session:
+            giveaway = Giveaway(
+                title=title, post_text=post_text,
+                winner_count=max(1, int(body.get("winner_count", 1))),
+                required_channels=channels_str,
+                creator_id=user_id, creator_username=username,
+                chat_id=user_id, ends_at=ends_at,
+            )
+            session.add(giveaway)
+            await session.commit()
+            await session.refresh(giveaway)
+            giveaway_id = giveaway.id
+
+    return {"success": True, "id": contest.id, "title": contest.title, "giveaway_id": giveaway_id}
 
 
 
