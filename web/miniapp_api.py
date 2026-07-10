@@ -644,6 +644,12 @@ async def miniapp_share_to_channel(
     if not giveaway_id or not channel:
         return {"error": "giveaway_id va channel kerak"}
 
+    # Parse channel: support @username, numeric ID, or -100... format
+    channel_id = channel.strip()
+    if channel_id.lstrip("-").isdigit():
+        channel_id = int(channel_id)
+    # else keep as string (@username)
+
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway).where(Giveaway.id == giveaway_id)
@@ -674,17 +680,17 @@ async def miniapp_share_to_channel(
     try:
         if giveaway.post_file_id and giveaway.post_media_type == "photo":
             await bot.send_photo(
-                channel, giveaway.post_file_id,
+                channel_id, giveaway.post_file_id,
                 caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
             )
         elif giveaway.post_file_id and giveaway.post_media_type == "video":
             await bot.send_video(
-                channel, giveaway.post_file_id,
+                channel_id, giveaway.post_file_id,
                 caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
             )
         else:
             await bot.send_message(
-                channel, giveaway.post_text or giveaway.title,
+                channel_id, giveaway.post_text or giveaway.title,
                 parse_mode="HTML", reply_markup=kb,
             )
         return {"success": True}

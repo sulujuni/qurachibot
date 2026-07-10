@@ -1818,8 +1818,11 @@ function showCreatedSharePrompt(gameId, gameType) {
 
     const sendToChannelLabel = currentLang === 'uz' ? "📢 Kanalga to'liq postni yuborish" :
         currentLang === 'ru' ? '📢 Отправить полный пост в канал' : '📢 Send full post to channel';
-    const channelPlaceholder = currentLang === 'uz' ? "@kanal_username yoki ID" :
-        currentLang === 'ru' ? '@канал или ID' : '@channel or ID';
+    const channelPlaceholder = currentLang === 'uz' ? "@username yoki -100... ID" :
+        currentLang === 'ru' ? '@username или -100... ID' : '@username or -100... ID';
+    const channelHint = currentLang === 'uz' ? "Yopiq kanallar uchun: kanaldan xabarni @idbot ga ulashing va ID ni kiriting (masalan: -1001234567890)" :
+        currentLang === 'ru' ? 'Для закрытых каналов: перешлите сообщение в @idbot и введите ID (напр: -1001234567890)' :
+        'For private channels: forward a message to @idbot and enter the ID (e.g. -1001234567890)';
     const sendBtn = currentLang === 'uz' ? "Yuborish" : currentLang === 'ru' ? 'Отправить' : 'Send';
     const copyLabel = currentLang === 'uz' ? "🔗 Havolani nusxalash" :
         currentLang === 'ru' ? '🔗 Скопировать ссылку' : '🔗 Copy link';
@@ -1842,6 +1845,7 @@ function showCreatedSharePrompt(gameId, gameType) {
                 <input class="form-input" id="shareChannelInput" placeholder="${channelPlaceholder}" style="flex:1;">
                 <button class="btn btn-primary" style="width:auto;padding:12px 18px;min-height:auto;" onclick="shareFullPost(${gameId},'${gameType}')">${sendBtn}</button>
             </div>
+            <div class="form-hint">${channelHint}</div>
             <div class="form-hint" id="shareStatus"></div>
         </div>
 
