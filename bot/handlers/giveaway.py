@@ -1,10 +1,10 @@
-"""Giveaway command handlers — post-based creation flow.
+"""Giveaway command handlers — full creation flow with scheduling.
 
-Admins send their giveaway post (text/photo/video) as-is.
-Bot asks only: winner count, duration, required channels.
-Then publishes the original post with a Join button.
+Flow: POST → PREVIEW → CHANNEL (validated) → WINNERS → START_TIME → END_TIME → SUB_CHANNELS → FINALIZE
+Supports scheduled publishing (QUEUED state) and immediate publish (ACTIVE).
 """
 
+import logging
 import random
 from datetime import datetime, timedelta
 
@@ -29,6 +29,7 @@ from bot.models import (
     GiveawayWinner,
     async_session,
 )
+from bot.models.user_channel import UserChannel
 from bot.utils.lang import get_user_lang, t
 from bot.utils.referral import verify_pending_referrals
 from bot.utils.subscription import (
@@ -38,8 +39,10 @@ from bot.utils.subscription import (
     serialize_channels,
 )
 
-# Conversation states (post-based flow)
-POST, PREVIEW, WINNERS, DURATION, CHANNELS = range(5)
+logger = logging.getLogger(__name__)
+
+# Conversation states (full creation flow with scheduling + channel validation)
+POST, PREVIEW, CHANNEL, WINNERS, START_TIME, END_TIME, SUB_CHANNELS = range(7)
 
 
 def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineKeyboardMarkup:
@@ -201,126 +204,196 @@ async def giveaway_receive_post(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def giveaway_preview_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle preview confirm/redo."""
+    """Handle preview confirm/redo → ask for channel."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang", "en")
 
     if query.data == "gwprev_redo":
-        # Ask to send again
         await query.edit_message_text(get_text("gw_send_post", lang=lang), parse_mode="HTML")
         return POST
 
-    # Confirmed — ask winner count
+    # Confirmed — ask for channel
+    channel_prompts = {
+        "uz": "📢 <b>Kanal tanlang</b>\n\nO'yin joylanadigan kanal @username yoki ID sini yuboring.\n\n💡 Yopiq kanallar uchun: @idbot ga ulashing.\n⚠️ Siz va bot kanalda admin bo'lishi kerak.",
+        "ru": "📢 <b>Выберите канал</b>\n\nОтправьте @username или ID канала.\n\n💡 Для закрытых: перешлите в @idbot.\n⚠️ Вы и бот должны быть админами.",
+        "en": "📢 <b>Select channel</b>\n\nSend @username or ID.\n\n💡 Private channels: use @idbot.\n⚠️ You and bot must be admins.",
+    }
+    await query.edit_message_text(channel_prompts.get(lang, channel_prompts["uz"]), parse_mode="HTML")
+    return CHANNEL
+
+
+async def giveaway_channel_entered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Validate channel: user is admin + bot can post (test-send-delete)."""
+    lang = context.user_data.get("lang", "en")
+    message = update.message
+    channel_input = message.text.strip()
+
+    # Parse channel ID
+    channel_id = int(channel_input) if channel_input.lstrip("-").isdigit() else channel_input
+
+    # 1. Check user is admin
+    try:
+        member = await context.bot.get_chat_member(chat_id=channel_id, user_id=message.from_user.id)
+        if member.status not in ("creator", "administrator"):
+            await message.reply_text("❌ Siz bu kanalning admini emassiz." if lang == "uz" else "❌ You're not an admin.")
+            return CHANNEL
+    except Exception:
+        await message.reply_text("❌ Kanal topilmadi yoki bot qo'shilmagan." if lang == "uz" else "❌ Channel not found or bot not added.")
+        return CHANNEL
+
+    # 2. Test-send-delete
+    try:
+        test_msg = await context.bot.send_message(channel_id, "🔧 test")
+        await context.bot.delete_message(channel_id, test_msg.message_id)
+    except Exception:
+        await message.reply_text("❌ Bot yoza olmaydi. Botga 'Post xabarlar' ruxsatini bering." if lang == "uz" else "❌ Bot can't post. Give it Post Messages permission.")
+        return CHANNEL
+
+    # Save channel info
+    try:
+        chat_info = await context.bot.get_chat(channel_id)
+        context.user_data["channel_id"] = chat_info.id
+        context.user_data["channel_title"] = chat_info.title
+    except Exception:
+        context.user_data["channel_id"] = channel_id
+        context.user_data["channel_title"] = str(channel_id)
+
+    await message.reply_text(f"✅ Kanal: <b>{context.user_data['channel_title']}</b>", parse_mode="HTML")
+
+    # Ask winner count
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("1", callback_data="gwwin_1"),
-            InlineKeyboardButton("2", callback_data="gwwin_2"),
-            InlineKeyboardButton("3", callback_data="gwwin_3"),
-        ],
-        [
-            InlineKeyboardButton("5", callback_data="gwwin_5"),
-            InlineKeyboardButton("10", callback_data="gwwin_10"),
-        ],
+        [InlineKeyboardButton("1", callback_data="gwwin_1"), InlineKeyboardButton("2", callback_data="gwwin_2"), InlineKeyboardButton("3", callback_data="gwwin_3")],
+        [InlineKeyboardButton("5", callback_data="gwwin_5"), InlineKeyboardButton("10", callback_data="gwwin_10")],
     ])
-    await query.edit_message_text(
-        get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML"
-    )
+    await message.reply_text(get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
     return WINNERS
 
 
 async def giveaway_winners_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle winner count button press."""
+    """Handle winner count → ask start time."""
     query = update.callback_query
     await query.answer()
     lang = context.user_data.get("lang", "en")
+    context.user_data["winner_count"] = int(query.data.split("_")[1])
 
-    count = int(query.data.split("_")[1])
-    context.user_data["winner_count"] = count
-
-    # Ask duration
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(get_text("dur_1h", lang=lang), callback_data="gwdur_1h"),
-            InlineKeyboardButton(get_text("dur_6h", lang=lang), callback_data="gwdur_6h"),
-            InlineKeyboardButton(get_text("dur_12h", lang=lang), callback_data="gwdur_12h"),
-        ],
-        [
-            InlineKeyboardButton(get_text("dur_24h", lang=lang), callback_data="gwdur_24h"),
-            InlineKeyboardButton(get_text("dur_3d", lang=lang), callback_data="gwdur_3d"),
-            InlineKeyboardButton(get_text("dur_7d", lang=lang), callback_data="gwdur_7d"),
-        ],
-        [InlineKeyboardButton(get_text("dur_none", lang=lang), callback_data="gwdur_none")],
-    ])
-    await query.edit_message_text(
-        get_text("gw_ask_duration", lang=lang), reply_markup=keyboard, parse_mode="HTML"
-    )
-    return DURATION
+    # Ask start time
+    prompt = "⏳ <b>Boshlanish vaqti</b>\n\nHozir yoki sana kiriting: <code>2025-12-31 21:00</code>" if lang == "uz" else "⏳ <b>Start time</b>\n\nNow or enter date: <code>2025-12-31 21:00</code>"
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Hozir / Now", callback_data="gwstart_now")]])
+    await query.edit_message_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    return START_TIME
 
 
-async def giveaway_duration_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle duration button press."""
-    query = update.callback_query
-    await query.answer()
+async def giveaway_start_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle start time: 'now' button or typed datetime → ask end time."""
     lang = context.user_data.get("lang", "en")
 
-    duration_map = {
-        "gwdur_1h": timedelta(hours=1),
-        "gwdur_6h": timedelta(hours=6),
-        "gwdur_12h": timedelta(hours=12),
-        "gwdur_24h": timedelta(hours=24),
-        "gwdur_3d": timedelta(days=3),
-        "gwdur_7d": timedelta(days=7),
-        "gwdur_none": None,
-    }
-    duration = duration_map.get(query.data)
-    context.user_data["ends_at"] = (datetime.utcnow() + duration) if duration else None
-
-    # Ask channels
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(get_text("gw_add_channels_btn", lang=lang), callback_data="gwch_add"),
-            InlineKeyboardButton(get_text("gw_skip_channels_btn", lang=lang), callback_data="gwch_skip"),
-        ],
-    ])
-    await query.edit_message_text(
-        get_text("gw_ask_channels", lang=lang), reply_markup=keyboard, parse_mode="HTML"
-    )
-    return CHANNELS
-
-
-async def giveaway_channels_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle channels skip/add choice."""
-    query = update.callback_query
-    await query.answer()
-    lang = context.user_data.get("lang", "en")
-
-    if query.data == "gwch_skip":
-        context.user_data["channels"] = None
-        return await _finalize_giveaway(query, context)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        context.user_data["scheduled_start"] = None  # Immediate
     else:
-        # Ask user to type channels
-        await query.edit_message_text(
-            get_text("gw_type_channels", lang=lang), parse_mode="HTML"
-        )
-        return CHANNELS
+        message = update.message
+        text = message.text.strip()
+        try:
+            parsed = datetime.strptime(text, "%Y-%m-%d %H:%M")
+            if parsed <= datetime.utcnow():
+                await message.reply_text("❌ Bu vaqt o'tgan. Kelajakdagi vaqt kiriting." if lang == "uz" else "❌ Time has passed.")
+                return START_TIME
+            context.user_data["scheduled_start"] = parsed
+        except ValueError:
+            await message.reply_text("❌ Format: <code>2025-12-31 21:00</code>", parse_mode="HTML")
+            return START_TIME
+
+    # Ask end time
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("1h", callback_data="gwend_1h"), InlineKeyboardButton("6h", callback_data="gwend_6h"), InlineKeyboardButton("12h", callback_data="gwend_12h")],
+        [InlineKeyboardButton("24h", callback_data="gwend_24h"), InlineKeyboardButton("3d", callback_data="gwend_3d"), InlineKeyboardButton("7d", callback_data="gwend_7d")],
+        [InlineKeyboardButton("♾ Chegarasiz", callback_data="gwend_none")],
+    ])
+    prompt = "⌛️ <b>Tugash vaqti</b> (avtomatik qur'a):\n\nDavomiylik tanlang yoki sana kiriting: <code>2025-12-31 23:59</code>" if lang == "uz" else "⌛️ <b>End time</b> (auto-draw):\n\nChoose duration or enter date:"
+    target = update.callback_query.message if update.callback_query else update.message
+    if update.callback_query:
+        await update.callback_query.edit_message_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await update.message.reply_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    return END_TIME
 
 
-async def giveaway_channels_typed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive typed channels and finalize."""
+async def giveaway_end_time_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle end time → ask sub channels."""
     lang = context.user_data.get("lang", "en")
-    text = update.message.text.strip()
-    channels = parse_channels(text)
-    context.user_data["channels"] = serialize_channels(channels) if channels else None
 
-    # Finalize — we don't have a callback_query here, so send a new message
-    return await _finalize_giveaway_from_message(update, context)
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        dur_map = {"gwend_1h": timedelta(hours=1), "gwend_6h": timedelta(hours=6), "gwend_12h": timedelta(hours=12), "gwend_24h": timedelta(hours=24), "gwend_3d": timedelta(days=3), "gwend_7d": timedelta(days=7), "gwend_none": None}
+        dur = dur_map.get(query.data)
+        base = context.user_data.get("scheduled_start") or datetime.utcnow()
+        context.user_data["ends_at"] = (base + dur) if dur else None
+    else:
+        message = update.message
+        try:
+            parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+            start = context.user_data.get("scheduled_start") or datetime.utcnow()
+            if parsed <= start:
+                await message.reply_text("❌ Tugash > boshlanish bo'lishi kerak." if lang == "uz" else "❌ End must be after start.")
+                return END_TIME
+            context.user_data["ends_at"] = parsed
+        except ValueError:
+            await message.reply_text("❌ Format: <code>2025-12-31 23:59</code>", parse_mode="HTML")
+            return END_TIME
+
+    # Ask subscription channels
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Kanal qo'shish" if lang == "uz" else "➕ Add channel", callback_data="gwsub_add")],
+        [InlineKeyboardButton("⏭ O'tkazish" if lang == "uz" else "⏭ Skip", callback_data="gwsub_done")],
+    ])
+    prompt = "📢 <b>Majburiy obuna</b>\n\nIshtirokchilar obuna bo'lishi kerak kanallar (ixtiyoriy):" if lang == "uz" else "📢 <b>Required subscription</b> (optional):"
+    target = update.callback_query.message if update.callback_query else update.message
+    if update.callback_query:
+        await update.callback_query.edit_message_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await update.message.reply_text(prompt, reply_markup=keyboard, parse_mode="HTML")
+    return SUB_CHANNELS
 
 
-async def _finalize_giveaway(query, context) -> int:
-    """Save giveaway to DB and publish the admin's original post."""
+async def giveaway_sub_channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle sub channel add/done."""
+    lang = context.user_data.get("lang", "en")
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        if query.data == "gwsub_done":
+            return await _finalize_full_giveaway(query, context)
+        # Ask for channel input
+        await query.edit_message_text("📢 Kanal @username yoki ID yuboring:" if lang == "uz" else "Send channel @username or ID:")
+        return SUB_CHANNELS
+    else:
+        # Validate and add channel
+        message = update.message
+        ch = message.text.strip()
+        channels_list = context.user_data.get("sub_channels_list", [])
+        channels_list.append(ch)
+        context.user_data["sub_channels_list"] = channels_list
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("➕ Yana qo'shish" if lang == "uz" else "➕ Add more", callback_data="gwsub_add")],
+            [InlineKeyboardButton("✅ Tayyor" if lang == "uz" else "✅ Done", callback_data="gwsub_done")],
+        ])
+        await message.reply_text(f"✅ Qo'shildi: {ch}", reply_markup=keyboard)
+        return SUB_CHANNELS
+
+
+async def _finalize_full_giveaway(query, context) -> int:
+    """Save giveaway. QUEUED if scheduled, ACTIVE+publish if now."""
     lang = context.user_data.get("lang", "en")
     post_data = context.user_data["post_data"]
+    scheduled_start = context.user_data.get("scheduled_start")
+    sub_channels = context.user_data.get("sub_channels_list", [])
+    channels_str = ",".join(sub_channels) if sub_channels else None
+    status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
 
     async with async_session() as session:
         giveaway = Giveaway(
@@ -329,8 +402,10 @@ async def _finalize_giveaway(query, context) -> int:
             post_file_id=post_data["post_file_id"],
             post_media_type=post_data["post_media_type"],
             winner_count=context.user_data["winner_count"],
-            required_channels=context.user_data.get("channels"),
-            status=GiveawayStatus.ACTIVE,
+            required_channels=channels_str,
+            status=status,
+            channel_id=context.user_data.get("channel_id"),
+            scheduled_start=scheduled_start,
             creator_id=query.from_user.id,
             creator_username=query.from_user.username,
             chat_id=query.message.chat_id,
@@ -340,72 +415,41 @@ async def _finalize_giveaway(query, context) -> int:
         await session.commit()
         await session.refresh(giveaway)
 
-    join_keyboard = _join_button(giveaway.id, 0, lang)
+    # If immediate, publish now
+    if not scheduled_start:
+        channel_id = context.user_data.get("channel_id") or query.message.chat_id
+        join_keyboard = _join_button(giveaway.id, 0, lang)
+        try:
+            msg = await send_giveaway_post(context.bot, channel_id, giveaway, join_keyboard)
+            async with async_session() as session:
+                g = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway.id))).scalar_one()
+                g.message_id = msg.message_id
+                g.published_at = datetime.utcnow()
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Publish failed: {e}")
 
-    # Delete the settings message
+    # Summary
+    start_txt = scheduled_start.strftime("%Y-%m-%d %H:%M") if scheduled_start else "Hozir"
+    end_txt = context.user_data["ends_at"].strftime("%Y-%m-%d %H:%M") if context.user_data.get("ends_at") else "♾"
+    ch_title = context.user_data.get("channel_title", "—")
+    summary = (
+        f"✅ <b>O'yin yaratildi!</b>\n\n"
+        f"📢 Kanal: <b>{ch_title}</b>\n"
+        f"🏆 G'oliblar: {giveaway.winner_count}\n"
+        f"⏳ Boshlanishi: {start_txt}\n"
+        f"⌛️ Tugashi: {end_txt}\n"
+        f"{'⏳ Avtomatik joylanadi.' if scheduled_start else '🟢 Joylandi!'}"
+    )
     try:
         await query.delete_message()
     except Exception:
         pass
+    await context.bot.send_message(query.message.chat_id, summary, parse_mode="HTML")
 
-    # Send the admin's original post with Join button
-    await send_giveaway_post(context.bot, query.message.chat_id, giveaway, join_keyboard)
-
-    # Send share buttons to the creator
+    # Share keyboard
     share_kb = _share_keyboard("gw", giveaway.id, lang)
-    share_texts = {
-        "uz": "✅ <b>Yutuqli o'yin yaratildi!</b>\n\nEndi uni kanalingizga yuboring:",
-        "ru": "✅ <b>Розыгрыш создан!</b>\n\nТеперь отправьте его в канал:",
-        "en": "✅ <b>Giveaway created!</b>\n\nNow share it to your channel:",
-    }
-    await context.bot.send_message(
-        query.message.chat_id, share_texts.get(lang, share_texts["uz"]),
-        reply_markup=share_kb, parse_mode="HTML",
-    )
-
-    context.user_data.clear()
-    return ConversationHandler.END
-
-
-async def _finalize_giveaway_from_message(update: Update, context) -> int:
-    """Same as _finalize_giveaway but triggered from a text message (channels typed)."""
-    lang = context.user_data.get("lang", "en")
-    post_data = context.user_data["post_data"]
-
-    async with async_session() as session:
-        giveaway = Giveaway(
-            title=context.user_data["title"],
-            post_text=post_data["post_text"],
-            post_file_id=post_data["post_file_id"],
-            post_media_type=post_data["post_media_type"],
-            winner_count=context.user_data["winner_count"],
-            required_channels=context.user_data.get("channels"),
-            status=GiveawayStatus.ACTIVE,
-            creator_id=update.effective_user.id,
-            creator_username=update.effective_user.username,
-            chat_id=update.effective_chat.id,
-            ends_at=context.user_data.get("ends_at"),
-        )
-        session.add(giveaway)
-        await session.commit()
-        await session.refresh(giveaway)
-
-    join_keyboard = _join_button(giveaway.id, 0, lang)
-
-    # Send the admin's original post with Join button
-    await send_giveaway_post(context.bot, update.effective_chat.id, giveaway, join_keyboard)
-
-    # Send share buttons to the creator
-    share_kb = _share_keyboard("gw", giveaway.id, lang)
-    share_texts = {
-        "uz": "✅ <b>Yutuqli o'yin yaratildi!</b>\n\nEndi uni kanalingizga yuboring:",
-        "ru": "✅ <b>Розыгрыш создан!</b>\n\nТеперь отправьте его в канал:",
-        "en": "✅ <b>Giveaway created!</b>\n\nNow share it to your channel:",
-    }
-    await update.message.reply_text(
-        share_texts.get(lang, share_texts["uz"]),
-        reply_markup=share_kb, parse_mode="HTML",
-    )
+    await context.bot.send_message(query.message.chat_id, "👆", reply_markup=share_kb)
 
     context.user_data.clear()
     return ConversationHandler.END
@@ -840,11 +884,19 @@ def get_giveaway_handlers() -> list:
                 ),
             ],
             PREVIEW: [CallbackQueryHandler(giveaway_preview_response, pattern=r"^gwprev_")],
+            CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channel_entered)],
             WINNERS: [CallbackQueryHandler(giveaway_winners_selected, pattern=r"^gwwin_")],
-            DURATION: [CallbackQueryHandler(giveaway_duration_selected, pattern=r"^gwdur_")],
-            CHANNELS: [
-                CallbackQueryHandler(giveaway_channels_choice, pattern=r"^gwch_"),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channels_typed),
+            START_TIME: [
+                CallbackQueryHandler(giveaway_start_time_handler, pattern=r"^gwstart_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_start_time_handler),
+            ],
+            END_TIME: [
+                CallbackQueryHandler(giveaway_end_time_handler, pattern=r"^gwend_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_end_time_handler),
+            ],
+            SUB_CHANNELS: [
+                CallbackQueryHandler(giveaway_sub_channels_handler, pattern=r"^gwsub_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_sub_channels_handler),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_creation)],
