@@ -500,15 +500,38 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     elif action == "channels":
         from bot.handlers.giveaway import my_channels_command
-        # Send channels list (can't edit into it because it's complex)
+        # Can't set update.message on frozen Update — just send /mychannels hint
         await query.delete_message()
-        # Simulate /mychannels by calling it
-        update.message = query.message  # Hack for reply context
-        await my_channels_command(update, context)
+        await context.bot.send_message(
+            query.message.chat_id,
+            "📢 /mychannels" if lang == "uz" else "📢 /mychannels",
+        )
+        # Call the command handler with a fake-free approach: just send the info directly
+        user_id = query.from_user.id
+        bot_username = (await context.bot.get_me()).username
+        from bot.models.user_channel import UserChannel
+        from sqlalchemy import select as sql_select
+        async with async_session() as session:
+            result = await session.execute(
+                sql_select(UserChannel).where(UserChannel.user_id == user_id).order_by(UserChannel.added_at.desc())
+            )
+            channels = result.scalars().all()
+        text = "📢 <b>" + ("Mening kanallarim" if lang == "uz" else "Мои каналы" if lang == "ru" else "My Channels") + "</b>\n"
+        if channels:
+            for i, ch in enumerate(channels, 1):
+                text += f"\n{i}. <b>{ch.chat_title or ch.chat_id}</b>\n   ID: <code>{ch.chat_id}</code>"
+        else:
+            text += "\n📭 " + ("Hali kanal yo'q" if lang == "uz" else "Каналов пока нет" if lang == "ru" else "No channels yet")
+        text += "\n\n💡 /mychannels"
+        await context.bot.send_message(query.message.chat_id, text, parse_mode="HTML")
 
     elif action == "joinfilter":
         await query.delete_message()
-        await menu_joinfilter(update, context)
+        # Send joinfilter info directly
+        await context.bot.send_message(
+            query.message.chat_id,
+            "🚪 " + ("So'rovlarni boshqarish uchun: menudagi '🚪' tugmasini bosing" if lang == "uz" else "Tap the 🚪 button in the menu"),
+        )
 
     elif action == "defaults":
         # Show creator defaults (button label + boost channels)
