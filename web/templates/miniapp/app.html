@@ -1841,6 +1841,7 @@ function showCreatedSharePrompt(gameId, gameType) {
 
         <div style="text-align:left;margin-bottom:16px;">
             <label style="font-size:12px;font-weight:600;color:var(--text-hint);display:block;margin-bottom:6px;">${sendToChannelLabel}</label>
+            <div id="knownChannels" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;"></div>
             <div style="display:flex;gap:8px;">
                 <input class="form-input" id="shareChannelInput" placeholder="${channelPlaceholder}" style="flex:1;">
                 <button class="btn btn-primary" style="width:auto;padding:12px 18px;min-height:auto;" onclick="shareFullPost(${gameId},'${gameType}')">${sendBtn}</button>
@@ -1855,6 +1856,26 @@ function showCreatedSharePrompt(gameId, gameType) {
 
     // Celebration!
     fireConfetti();
+
+    // Load known channels (from join filters) as quick-select
+    loadKnownChannels();
+}
+
+async function loadKnownChannels() {
+    const container = document.getElementById('knownChannels');
+    if (!container) return;
+    try {
+        const filters = await api('/join-filters');
+        if (filters && filters.length) {
+            const label = currentLang === 'uz' ? "Tanlang:" : currentLang === 'ru' ? 'Выберите:' : 'Select:';
+            let html = `<span style="font-size:11px;color:var(--text-hint);width:100%;">${label}</span>`;
+            filters.forEach(f => {
+                const name = f.chat_title || f.chat_id;
+                html += `<button class="chip" style="font-size:12px;padding:6px 12px;min-height:32px;" onclick="document.getElementById('shareChannelInput').value='${f.chat_id}'">${ic('megaphone',13)} ${name}</button>`;
+            });
+            container.innerHTML = html;
+        }
+    } catch(e) {}
 }
 
 async function shareFullPost(gameId, gameType) {
