@@ -42,12 +42,15 @@ from bot.utils.subscription import (
 logger = logging.getLogger(__name__)
 
 # Conversation states (full creation flow with scheduling + channel validation)
-POST, PREVIEW, CHANNEL, WINNERS, START_TIME, END_TIME, SUB_CHANNELS = range(7)
+POST, PREVIEW, BUTTON_LABEL, CHANNEL, WINNERS, START_TIME, END_TIME, SUB_CHANNELS, BOOST_CHANNELS = range(9)
 
 
-def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineKeyboardMarkup:
+def _join_button(giveaway_id: int, participant_count: int, lang: str, custom_label: str | None = None) -> InlineKeyboardMarkup:
     """Build the 'Join' button for a giveaway announcement."""
-    label = f"🎮 {get_text('gw_join_button', lang=lang)} ({participant_count})"
+    if custom_label:
+        label = f"{custom_label} ({participant_count})"
+    else:
+        label = f"🎮 {get_text('gw_join_button', lang=lang)} ({participant_count})"
     web_url = settings.WEB_URL
     if web_url:
         url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={giveaway_id}"
@@ -55,6 +58,46 @@ def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineK
     else:
         button = InlineKeyboardButton(label, callback_data=f"join_gw_{giveaway_id}")
     return InlineKeyboardMarkup([[button]])
+
+
+async def _weighted_draw(participants, winner_count: int, boost_channels_str: str | None, bot) -> list:
+    """Draw winners weighted by boost-channel subscriptions.
+    Weight = 1 + number of verified boost subscriptions per participant.
+    """
+    if not boost_channels_str or not boost_channels_str.strip():
+        return random.sample(list(participants), min(winner_count, len(participants)))
+
+    boost_list = [ch.strip() for ch in boost_channels_str.split(",") if ch.strip()]
+    if not boost_list:
+        return random.sample(list(participants), min(winner_count, len(participants)))
+
+    # Calculate weights
+    weights = []
+    for p in participants:
+        verified = 0
+        for ch in boost_list:
+            try:
+                member = await bot.get_chat_member(chat_id=ch, user_id=p.user_id)
+                if member.status not in ("left", "kicked"):
+                    verified += 1
+            except Exception:
+                pass
+        weights.append(1 + verified)
+
+    # Weighted selection without replacement
+    p_list = list(participants)
+    selected = []
+    remaining_idx = list(range(len(p_list)))
+    remaining_w = list(weights)
+    for _ in range(min(winner_count, len(p_list))):
+        if not remaining_idx:
+            break
+        chosen = random.choices(remaining_idx, weights=remaining_w, k=1)[0]
+        idx = remaining_idx.index(chosen)
+        selected.append(p_list[chosen])
+        remaining_idx.pop(idx)
+        remaining_w.pop(idx)
+    return selected
 
 
 def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMarkup:
@@ -213,14 +256,50 @@ async def giveaway_preview_response(update: Update, context: ContextTypes.DEFAUL
         await query.edit_message_text(get_text("gw_send_post", lang=lang), parse_mode="HTML")
         return POST
 
-    # Confirmed — ask for channel
+    # Confirmed — ask for button label
+    presets = {
+        "uz": ["🎁 Qatnashish!", "Qatnashish", "💎 Qo'shilish", "🍀 Men ham!"],
+        "ru": ["🎁 Участвовать!", "Участвовать", "💎 Вступить", "🍀 Я в деле!"],
+        "en": ["🎁 Participate!", "Participate", "💎 Join", "🍀 I'm in!"],
+    }
+    preset_list = presets.get(lang, presets["uz"])
+    buttons = [[InlineKeyboardButton(p, callback_data=f"gwbtn_{i}")] for i, p in enumerate(preset_list)]
+    buttons.append([InlineKeyboardButton(get_text("gw_btn_custom", lang=lang), callback_data="gwbtn_custom")])
+    buttons.append([InlineKeyboardButton(get_text("gw_btn_default", lang=lang), callback_data="gwbtn_default")])
+    context.user_data["btn_presets"] = preset_list
+
+    await query.edit_message_text(get_text("gw_ask_button_label", lang=lang), reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML")
+    return BUTTON_LABEL
+
+
+async def giveaway_button_label_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle button label selection → ask for channel."""
+    lang = context.user_data.get("lang", "en")
     channel_prompts = {
         "uz": "📢 <b>Kanal tanlang</b>\n\nO'yin joylanadigan kanal @username yoki ID sini yuboring.\n\n💡 Yopiq kanallar uchun: @idbot ga ulashing.\n⚠️ Siz va bot kanalda admin bo'lishi kerak.",
-        "ru": "📢 <b>Выберите канал</b>\n\nОтправьте @username или ID канала.\n\n💡 Для закрытых: перешлите в @idbot.\n⚠️ Вы и бот должны быть админами.",
-        "en": "📢 <b>Select channel</b>\n\nSend @username or ID.\n\n💡 Private channels: use @idbot.\n⚠️ You and bot must be admins.",
+        "ru": "📢 <b>Выберите канал</b>\n\nОтправьте @username или ID.\n⚠️ Вы и бот должны быть админами.",
+        "en": "📢 <b>Select channel</b>\n\nSend @username or ID.\n⚠️ You and bot must be admins.",
     }
-    await query.edit_message_text(channel_prompts.get(lang, channel_prompts["uz"]), parse_mode="HTML")
-    return CHANNEL
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        if query.data == "gwbtn_default":
+            context.user_data["button_label"] = None
+        elif query.data == "gwbtn_custom":
+            await query.edit_message_text(get_text("gw_type_button_label", lang=lang), parse_mode="HTML")
+            return BUTTON_LABEL
+        else:
+            idx = int(query.data.split("_")[1])
+            presets = context.user_data.get("btn_presets", [])
+            context.user_data["button_label"] = presets[idx] if idx < len(presets) else None
+        await query.edit_message_text(channel_prompts.get(lang, channel_prompts["uz"]), parse_mode="HTML")
+        return CHANNEL
+    else:
+        # Custom text typed
+        context.user_data["button_label"] = update.message.text.strip()[:100]
+        await update.message.reply_text(channel_prompts.get(lang, channel_prompts["uz"]), parse_mode="HTML")
+        return CHANNEL
 
 
 async def giveaway_channel_entered(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1429,6 +1508,10 @@ def get_giveaway_handlers() -> list:
                 ),
             ],
             PREVIEW: [CallbackQueryHandler(giveaway_preview_response, pattern=r"^gwprev_")],
+            BUTTON_LABEL: [
+                CallbackQueryHandler(giveaway_button_label_handler, pattern=r"^gwbtn_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_button_label_handler),
+            ],
             CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channel_entered)],
             WINNERS: [CallbackQueryHandler(giveaway_winners_selected, pattern=r"^gwwin_")],
             START_TIME: [

@@ -5,7 +5,6 @@
   "ref_pending": "⏳ Thanks for joining! Your referral will count once you subscribe to the required channel(s) and join a giveaway.",
   "lang_select": "🌐 <b>Choose your language:</b>",
   "lang_set": "✅ Language set to <b>{lang_name}</b>",
-
   "gw_create_title": "🎉 <b>Create a New Giveaway</b>\n\nLet's set it up! First, enter the <b>title</b>.\n\n❌ To cancel, type \"Cancel\".",
   "gw_create_description": "📝 Great! Now send me a <b>description</b> for the giveaway.\n(What are participants competing for? Any rules?)\n\nOr send /skip to skip the description.",
   "gw_create_prize": "🎁 What's the <b>prize</b>?\n(e.g., '$50 Gift Card', 'Premium subscription', 'Custom artwork')",
@@ -38,7 +37,6 @@
   "gw_cancel_done": "❌ Giveaway <b>'{title}'</b> has been cancelled.",
   "gw_ends_at": "📅 Ends: {time}",
   "gw_no_limit": "📅 No time limit (manual draw)",
-
   "dur_1h": "1 hour",
   "dur_6h": "6 hours",
   "dur_12h": "12 hours",
@@ -46,7 +44,6 @@
   "dur_3d": "3 days",
   "dur_7d": "7 days",
   "dur_none": "No time limit",
-
   "ct_create_title": "🏅 <b>Create a New Contest</b>\n\nLet's set it up! First, enter the <b>title</b>.\n\n❌ To cancel, type \"Cancel\".",
   "ct_create_description": "📝 Now give a <b>description</b> for the contest.\n(What should participants do? Any rules or criteria?)\n\nOr send /skip to skip.",
   "ct_create_type": "📂 What <b>type</b> of submissions should the contest accept?",
@@ -93,18 +90,14 @@
   "ct_cancel_done": "❌ Contest <b>'{title}'</b> has been cancelled.",
   "ct_my_list_empty": "You haven't created any contests yet.\n\n👇 Tap the \"🏅 Create Contest\" button below!",
   "ct_my_list_header": "📋 <b>Your Contests (last 10):</b>\n\n",
-
   "ct_type_text": "📝 Text",
   "ct_type_photo": "📷 Photo",
   "ct_type_any": "📎 Any",
-
   "ct_status_accepting": "Accepting submissions",
   "ct_status_voting": "Voting in progress",
   "ct_status_completed": "Completed",
   "ct_status_cancelled": "Cancelled",
-
   "votes": "votes",
-
   "gg_use_in_group": "❌ This command works in groups and channels!\n\n• <b>In a group:</b> Use /groupgiveaway directly\n• <b>For a channel:</b> Use /channelgiveaway in the channel's linked discussion group, or make the bot an admin in your channel and use /channelgiveaway there.",
   "gg_use_in_channel": "❌ Use this command in:\n• Your channel (bot must be admin)\n• The channel's linked discussion group\n\nThe bot will post the giveaway and track comments as entries automatically.",
   "gg_create_intro": "🎯 <b>Create a {source} Comment Giveaway</b>\n\nUsers will comment on the giveaway post to enter.\nOnly ONE comment per user counts!\n\nWhat's the <b>title</b> of this giveaway?\n\nSend /cancel to abort.",
@@ -164,19 +157,16 @@
   "gg_already_finished": "❌ Already finished.",
   "gg_cancel_done": "❌ Giveaway <b>'{title}'</b> cancelled.",
   "gg_no_participants_expired": "❌ Giveaway <b>'{title}'</b> ended with no valid entries.",
-
   "alert_giveaway_header": "New Giveaway!",
   "alert_contest_header": "New Contest!",
   "alert_prize_label": "Prize",
   "alert_winners_label": "Winners",
   "alert_giveaway_cta": "👉 Open the bot to join before it ends!",
   "alert_contest_cta": "👉 Open the bot to submit your entry!",
-
   "sub_already": "✅ You're already subscribed to alerts!",
   "sub_done": "🔔 <b>Subscribed!</b>\n\nYou'll be notified when:\n• A new giveaway is created\n• A new contest is created\n• A giveaway or contest is ending soon",
   "unsub_not": "ℹ️ You're not subscribed to alerts.",
   "unsub_done": "🔕 Unsubscribed. You won't receive notifications anymore.",
-
   "gw_send_post": "📝 <b>Send me the giveaway post</b>\n\nSend it exactly as you want participants to see it — text, photo, or video. Your formatting will be preserved.",
   "gw_ask_winners": "🏆 <b>How many winners?</b>",
   "gw_ask_duration": "⏰ <b>How long should it run?</b>",
@@ -191,5 +181,13 @@
   "ct_ask_type": "📎 <b>What type of entries should participants submit?</b>",
   "ct_ask_winners": "🏆 <b>How many winners?</b>",
   "f_post_content": "Post content",
-  "f_post_required": "Post content is required!"
+  "f_post_required": "Post content is required!",
+  "gw_ask_button_label": "🔘 <b>Choose button label</b>\n\nSelect a preset or type your own:",
+  "gw_btn_custom": "✏️ Type my own",
+  "gw_btn_default": "⏭ Use default",
+  "gw_type_button_label": "✏️ Type button text (max 100 chars):",
+  "gw_ask_boost_channels": "⚡️ <b>Boost channels</b> (optional)\n\nExtra entries for subscribers (max 3):",
+  "gw_add_boost_btn": "Add boost channel",
+  "gw_type_boost_channel": "⚡️ Send boost channel @username or ID:",
+  "gw_chat_picker_hint": "👇 Or use native Telegram picker:"
 }

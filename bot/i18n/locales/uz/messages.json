@@ -5,7 +5,6 @@
   "ref_pending": "⏳ Qo'shilganingiz uchun rahmat! Taklifingiz siz majburiy kanallarga obuna bo'lib, yutuqli o'yinda qatnashganingizdan keyin hisobga olinadi.",
   "lang_select": "🌐 <b>Tilni tanlang:</b>",
   "lang_set": "✅ Til o'rnatildi: <b>{lang_name}</b>",
-
   "gw_create_title": "🎉 <b>Yangi yutuqli o'yin yaratish</b>\n\nKeling, sozlaymiz! Avvalo, o'yin <b>nomini</b> kiriting.\n\n❌ Bekor qilish uchun \"Bekor\" deb yozing.",
   "gw_create_description": "📝 Ajoyib! Endi yutuqli o'yin uchun <b>tavsif</b> yozing.\n(Nima o'ynatilyapti? Qanday qoidalar bor?)\n\nO'tkazib yuborish uchun /skip yuboring.",
   "gw_create_prize": "🎁 <b>Sovg'a</b> nima?\n(masalan, '50$ sovg'a kartasi', 'Premium obuna', 'Maxsus rasm')",
@@ -38,7 +37,6 @@
   "gw_cancel_done": "❌ <b>'{title}'</b> yutuqli o'yini bekor qilindi.",
   "gw_ends_at": "📅 Tugash: {time}",
   "gw_no_limit": "📅 Chegarasiz (g'olib qo'lda aniqlanadi)",
-
   "dur_1h": "1 soat",
   "dur_6h": "6 soat",
   "dur_12h": "12 soat",
@@ -46,7 +44,6 @@
   "dur_3d": "3 kun",
   "dur_7d": "7 kun",
   "dur_none": "Chegarasiz",
-
   "ct_create_title": "🏅 <b>Yangi konkurs yaratish</b>\n\nKeling, sozlaymiz! Avvalo, konkurs <b>nomini</b> kiriting.\n\n❌ Bekor qilish uchun \"Bekor\" deb yozing.",
   "ct_create_description": "📝 Endi konkurs uchun <b>tavsif</b> yozing.\n(Ishtirokchilar nima qilishi kerak? Qanday qoidalar bor?)\n\nO'tkazib yuborish uchun /skip yuboring.",
   "ct_create_type": "📂 Konkurs qanday <b>turdagi</b> ishtiroklarni qabul qiladi?",
@@ -93,18 +90,14 @@
   "ct_cancel_done": "❌ <b>'{title}'</b> konkursi bekor qilindi.",
   "ct_my_list_empty": "Siz hali konkurs yaratmagansiz.\n\n👇 Pastdagi \"🏅 Konkurs yaratish\" tugmasini bosing!",
   "ct_my_list_header": "📋 <b>Sizning konkurslaringiz (oxirgi 10):</b>\n\n",
-
   "ct_type_text": "📝 Matn",
   "ct_type_photo": "📷 Rasm",
   "ct_type_any": "📎 Har qanday",
-
   "ct_status_accepting": "Ishtiroklar qabul qilinmoqda",
   "ct_status_voting": "Ovoz berish",
   "ct_status_completed": "Yakunlangan",
   "ct_status_cancelled": "Bekor qilingan",
-
   "votes": "ovoz",
-
   "gg_use_in_group": "❌ Bu buyruq guruh va kanallarda ishlaydi!\n\n• <b>Guruhda:</b> to'g'ridan-to'g'ri /groupgiveaway ni ishlating\n• <b>Kanal uchun:</b> kanalning muhokama guruhida /channelgiveaway ni ishlating yoki botni kanalga administrator qilib, o'sha yerda /channelgiveaway ni ishlating.",
   "gg_use_in_channel": "❌ Bu buyruqni quyidagilarda ishlating:\n• Kanalingizda (bot administrator bo'lishi shart)\n• Kanalning muhokama guruhida\n\nBot yutuqli o'yinni joylaydi va izohlarni ishtirok sifatida avtomatik hisoblaydi.",
   "gg_create_intro": "🎯 <b>Izohli yutuqli o'yin yaratish ({source})</b>\n\nFoydalanuvchilar qatnashish uchun post ostiga izoh yozadilar.\nHar bir kishidan faqat BITTA izoh hisobga olinadi!\n\nO'yin <b>nomi</b> qanday?\n\nBekor qilish uchun /cancel yuboring.",
@@ -164,19 +157,16 @@
   "gg_already_finished": "❌ Allaqachon tugagan.",
   "gg_cancel_done": "❌ <b>'{title}'</b> yutuqli o'yini bekor qilindi.",
   "gg_no_participants_expired": "❌ <b>'{title}'</b> yutuqli o'yini ishtiroksiz tugadi.",
-
   "alert_giveaway_header": "Yangi yutuqli o'yin!",
   "alert_contest_header": "Yangi konkurs!",
   "alert_prize_label": "Sovg'a",
   "alert_winners_label": "G'oliblar",
   "alert_giveaway_cta": "👉 Ishtirok etish uchun botni oching, tugab qolmasin!",
   "alert_contest_cta": "👉 Ishtirokingizni yuborish uchun botni oching!",
-
   "sub_already": "✅ Siz allaqachon bildirishnomalarga obuna bo'lgansiz!",
   "sub_done": "🔔 <b>Obuna bo'ldingiz!</b>\n\nQuyidagi hollarda xabar olasiz:\n• Yangi yutuqli o'yin yaratilganda\n• Yangi konkurs yaratilganda\n• Yutuqli o'yin yoki konkurs tugashiga oz qolganda",
   "unsub_not": "ℹ️ Siz bildirishnomalarga obuna bo'lmagansiz.",
   "unsub_done": "🔕 Obuna bekor qilindi. Endi bildirishnoma olmaysiz.",
-
   "gw_send_post": "📝 <b>Yutuqli o'yin postini yuboring</b>\n\nIshtirokchilar ko'radigan tarzda yuboring — matn, rasm yoki video. Formatlash saqlanib qoladi.",
   "gw_ask_winners": "🏆 <b>Nechta g'olib?</b>",
   "gw_ask_duration": "⏰ <b>Qancha davom etadi?</b>",
@@ -191,5 +181,13 @@
   "ct_ask_type": "📎 <b>Ishtirokchilar qanday ariza yuborishadi?</b>",
   "ct_ask_winners": "🏆 <b>Nechta g'olib?</b>",
   "f_post_content": "Post matni",
-  "f_post_required": "Post matni kiritilishi shart!"
+  "f_post_required": "Post matni kiritilishi shart!",
+  "gw_ask_button_label": "🔘 <b>Tugma matnini tanlang</b>\n\nTayyor variantni tanlang yoki o'zingiz yozing:",
+  "gw_btn_custom": "✏️ O'zim yozaman",
+  "gw_btn_default": "⏭ Standart",
+  "gw_type_button_label": "✏️ Tugma matnini yozing (maks 100):",
+  "gw_ask_boost_channels": "⚡️ <b>Bonus kanallar</b> (ixtiyoriy)\n\nQo'shimcha imkoniyat (maks 3):",
+  "gw_add_boost_btn": "Bonus kanal qo'shish",
+  "gw_type_boost_channel": "⚡️ Bonus kanal @username yoki ID:",
+  "gw_chat_picker_hint": "👇 Yoki Telegramdan tanlang:"
 }

@@ -39,6 +39,12 @@ class Giveaway(Base):
     # Test mode: if True, does not notify subscribers
     is_test: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Custom join button label (null = use default)
+    button_label: Mapped[str] = mapped_column(String(100), nullable=True)
+
+    # Boost channels: optional extra-entry channels (comma-separated)
+    boost_channels: Mapped[str] = mapped_column(Text, nullable=True)
+
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     creator_username: Mapped[str] = mapped_column(String(255), nullable=True)

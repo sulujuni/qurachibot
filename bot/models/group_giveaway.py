@@ -47,6 +47,12 @@ class GroupGiveaway(Base):
     # Comma-separated list of channels users must join to participate (forced-sub)
     required_channels: Mapped[str] = mapped_column(Text, nullable=True)
 
+    # Custom join button label (null = use default)
+    button_label: Mapped[str] = mapped_column(String(100), nullable=True)
+
+    # Boost channels: optional extra-entry channels (comma-separated)
+    boost_channels: Mapped[str] = mapped_column(Text, nullable=True)
+
     # Post-based creation: the admin's original post content
     post_text: Mapped[str] = mapped_column(Text, nullable=True)
     post_file_id: Mapped[str] = mapped_column(String(500), nullable=True)
