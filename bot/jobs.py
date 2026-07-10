@@ -51,7 +51,7 @@ async def publish_queued_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway).where(
-                Giveaway.status == GiveawayStatus.QUEUED,
+                Giveaway.status == "queued",
                 Giveaway.scheduled_start <= now,
                 Giveaway.scheduled_start != None,
             )

@@ -63,7 +63,7 @@ async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         # Giveaway stats
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar()
         gw_active = (await session.execute(
-            select(func.count(Giveaway.id)).where(Giveaway.status == GiveawayStatus.ACTIVE)
+            select(func.count(Giveaway.id)).where(Giveaway.status == "active")
         )).scalar()
         gw_participants = (await session.execute(select(func.count(GiveawayParticipant.id)))).scalar()
         gw_winners = (await session.execute(select(func.count(GiveawayWinner.id)))).scalar()

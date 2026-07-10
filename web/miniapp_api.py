@@ -575,7 +575,7 @@ async def miniapp_create_giveaway(
             ch = str(channel_id_val).strip()
             parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
 
-        gw_status = GiveawayStatus.QUEUED if scheduled_start else "active"
+        gw_status = "queued" if scheduled_start else "active"
 
         giveaway = Giveaway(
             title=title, post_text=post_text,
@@ -862,7 +862,7 @@ async def miniapp_create_contest(
             ch = str(channel_id_val).strip()
             parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
 
-        gw_status = GiveawayStatus.QUEUED if scheduled_start else "active"
+        gw_status = "queued" if scheduled_start else "active"
 
         async with async_session() as session:
             giveaway = Giveaway(

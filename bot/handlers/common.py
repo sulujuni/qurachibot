@@ -304,7 +304,7 @@ async def menu_my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         participations = result.scalars().all()
 
-    status_emoji = {GiveawayStatus.ACTIVE: "🟢", GiveawayStatus.COMPLETED: "✅", GiveawayStatus.CANCELLED: "❌"}
+    status_emoji = {"active": "🟢", "completed": "✅", "cancelled": "❌"}
 
     texts = {
         "uz": "📋 <b>Mening o'yinlarim</b>\n\n",
