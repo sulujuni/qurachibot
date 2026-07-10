@@ -907,41 +907,168 @@ async def edit_field_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List user's giveaways. Command: /mygiveaways"""
+    """Paginated giveaway browser. Command: /mygiveaways"""
     user_id = update.effective_user.id
     lang = await get_user_lang(user_id)
+    context.user_data["mygw_page"] = 0
+    await _show_my_giveaway_page(context.bot, update.effective_chat.id, user_id, 0, lang)
 
+
+async def _show_my_giveaway_page(bot, chat_id, user_id, page, lang, edit_message_id=None):
+    """Show a single giveaway with Next/Back nav + actions."""
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway)
             .options(selectinload(Giveaway.participants))
             .where(Giveaway.creator_id == user_id)
             .order_by(Giveaway.created_at.desc())
-            .limit(10)
         )
         giveaways = result.scalars().all()
 
     if not giveaways:
-        await update.message.reply_text(get_text("gw_my_list_empty", lang=lang))
+        await bot.send_message(chat_id, get_text("gw_my_list_empty", lang=lang))
         return
 
+    # Clamp page
+    if page < 0:
+        page = 0
+    if page >= len(giveaways):
+        page = len(giveaways) - 1
+
+    gw = giveaways[page]
+    total = len(giveaways)
+
     status_emoji = {
-        GiveawayStatus.DRAFT: "📝",
-        GiveawayStatus.QUEUED: "⏳",
-        GiveawayStatus.ACTIVE: "🟢",
-        GiveawayStatus.COMPLETED: "✅",
-        GiveawayStatus.CANCELLED: "❌",
+        GiveawayStatus.DRAFT: "📝", GiveawayStatus.QUEUED: "⏳",
+        GiveawayStatus.ACTIVE: "🟢", GiveawayStatus.COMPLETED: "✅", GiveawayStatus.CANCELLED: "❌",
     }
+    emoji = status_emoji.get(gw.status, "❓")
+    p_count = len(gw.participants)
 
-    text = get_text("gw_my_list_header", lang=lang)
-    for gw in giveaways:
-        emoji = status_emoji.get(gw.status, "❓")
-        text += (
-            f"{emoji} <b>{gw.title}</b> (ID: {gw.id})\n"
-            f"   👤 {len(gw.participants)} | {gw.status.value}\n\n"
-        )
+    start_str = gw.scheduled_start.strftime("%Y-%m-%d %H:%M") if gw.scheduled_start else ""
+    end_str = gw.ends_at.strftime("%Y-%m-%d %H:%M") if gw.ends_at else ""
 
-    await update.message.reply_text(text, parse_mode="HTML")
+    text = (
+        f"{emoji} <b>{gw.title}</b>\n\n"
+        f"📊 {gw.status.value} | 👤 {p_count} ishtirokchi\n"
+        f"🏆 G'oliblar: {gw.winner_count}\n"
+    )
+    if start_str:
+        text += f"⏳ Boshlanish: {start_str}\n"
+    if end_str:
+        text += f"⌛️ Tugash: {end_str}\n"
+    text += f"\n📄 {page+1}/{total}"
+
+    # Navigation + action buttons
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️", callback_data=f"mygw_prev_{page}"))
+    nav_buttons.append(InlineKeyboardButton(f"{page+1}/{total}", callback_data="mygw_noop"))
+    if page < total - 1:
+        nav_buttons.append(InlineKeyboardButton("➡️", callback_data=f"mygw_next_{page}"))
+
+    action_buttons = []
+    if gw.status == GiveawayStatus.ACTIVE:
+        action_buttons.append(InlineKeyboardButton("🎲 Qur'a", callback_data=f"mygw_draw_{gw.id}"))
+        action_buttons.append(InlineKeyboardButton("❌ Bekor", callback_data=f"mygw_cancel_{gw.id}"))
+    if gw.status in (GiveawayStatus.DRAFT, GiveawayStatus.QUEUED, GiveawayStatus.ACTIVE):
+        action_buttons.append(InlineKeyboardButton("✏️ Tahrir", callback_data=f"mygw_edit_{gw.id}"))
+
+    rows = [nav_buttons]
+    if action_buttons:
+        rows.append(action_buttons)
+
+    kb = InlineKeyboardMarkup(rows)
+
+    if edit_message_id:
+        try:
+            await bot.edit_message_text(text, chat_id=chat_id, message_id=edit_message_id, reply_markup=kb, parse_mode="HTML")
+            return
+        except Exception:
+            pass
+    await bot.send_message(chat_id, text, reply_markup=kb, parse_mode="HTML")
+
+
+async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Next/Back/Draw/Cancel/Edit in paginated browser."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data  # mygw_<action>_<value>
+    parts = data.split("_")
+    action = parts[1]
+
+    user_id = query.from_user.id
+    lang = await get_user_lang(user_id)
+
+    if action == "prev":
+        page = int(parts[2]) - 1
+        await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
+
+    elif action == "next":
+        page = int(parts[2]) + 1
+        await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
+
+    elif action == "noop":
+        pass
+
+    elif action == "draw":
+        giveaway_id = int(parts[2])
+        # Quick-draw from browser
+        async with async_session() as session:
+            result = await session.execute(
+                select(Giveaway).options(selectinload(Giveaway.participants)).where(Giveaway.id == giveaway_id)
+            )
+            giveaway = result.scalar_one_or_none()
+            if not giveaway or giveaway.creator_id != user_id or giveaway.status != GiveawayStatus.ACTIVE:
+                await query.answer("❌", show_alert=True)
+                return
+            if not giveaway.participants:
+                await query.answer("Ishtirokchilar yo'q", show_alert=True)
+                return
+            winner_count = min(giveaway.winner_count, len(giveaway.participants))
+            winners = random.sample(list(giveaway.participants), winner_count)
+            for w in winners:
+                session.add(GiveawayWinner(giveaway_id=giveaway_id, user_id=w.user_id, username=w.username, first_name=w.first_name))
+            giveaway.status = GiveawayStatus.COMPLETED
+            giveaway.drawn_at = datetime.utcnow()
+            await session.commit()
+
+        # Announce
+        mention_text = "\n".join(f'🏆 {i+1}. <a href="tg://user?id={w.user_id}">{w.first_name or w.username or "User"}</a>' for i, w in enumerate(winners))
+        ch = giveaway.channel_id or giveaway.chat_id
+        try:
+            await context.bot.send_message(ch, f"🎊 <b>{giveaway.title}</b>\n\n<b>G'oliblar:</b>\n{mention_text}\n\n🎉", parse_mode="HTML")
+        except Exception:
+            pass
+        for w in winners:
+            try:
+                await context.bot.send_message(w.user_id, f"🎉 Tabriklaymiz! <b>{giveaway.title}</b> g'olibi siz!", parse_mode="HTML")
+            except Exception:
+                pass
+
+        await query.answer("🎉 Qur'a o'tkazildi!")
+        page = context.user_data.get("mygw_page", 0)
+        await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
+
+    elif action == "cancel":
+        giveaway_id = int(parts[2])
+        async with async_session() as session:
+            result = await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
+            gw = result.scalar_one_or_none()
+            if gw and gw.creator_id == user_id and gw.status in (GiveawayStatus.ACTIVE, GiveawayStatus.QUEUED, GiveawayStatus.DRAFT):
+                gw.status = GiveawayStatus.CANCELLED
+                await session.commit()
+        await query.answer("❌ Bekor qilindi")
+        page = context.user_data.get("mygw_page", 0)
+        await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
+
+    elif action == "edit":
+        giveaway_id = int(parts[2])
+        async with async_session() as session:
+            result = await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
+            gw = result.scalar_one_or_none()
+        if gw and gw.creator_id == user_id:
+            await _show_edit_summary(context.bot, query.message.chat_id, gw, lang)
 
 
 # ─── Cancel Giveaway ─────────────────────────────────────────────────────────────
@@ -1185,4 +1312,5 @@ def get_giveaway_handlers() -> list:
         CommandHandler("cancelgiveaway", cancel_giveaway),
         CallbackQueryHandler(join_giveaway_callback, pattern=r"^join_gw_\d+$"),
         CallbackQueryHandler(edit_field_callback, pattern=r"^gwedit_"),
+        CallbackQueryHandler(my_giveaways_nav_callback, pattern=r"^mygw_"),
     ]
