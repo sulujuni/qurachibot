@@ -874,15 +874,34 @@ async function renderHome() {
         html += emptyState('gift', t('no_active_gw'));
     } else {
         games.forEach(g => {
+            // Build post preview (strip HTML, truncate)
+            const postPreview = (g.post_text || g.description || '').replace(/<[^>]+>/g, '').substring(0, 120);
+            // Channel links
+            let channelHtml = '';
+            if (g.required_channels) {
+                const channels = g.required_channels.split(',').map(c => c.trim()).filter(Boolean);
+                if (channels.length) {
+                    channelHtml = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;">`;
+                    channels.forEach(ch => {
+                        const link = ch.startsWith('@') ? `https://t.me/${ch.slice(1)}` : '#';
+                        channelHtml += `<a href="${link}" target="_blank" class="sub-link" style="padding:7px 11px;font-size:12px;margin:0;" onclick="event.stopPropagation();">${ic('megaphone',13)} ${ch}</a>`;
+                    });
+                    channelHtml += `</div>`;
+                }
+            }
+
             html += `<div class="game-item" style="flex-direction:column;align-items:stretch;" onclick="openGiveaway(${g.id})">
                 <div style="display:flex;align-items:center;gap:13px;width:100%;">
                     <div class="game-icon">${ic('gift')}</div>
                     <div class="game-info">
                         <div class="game-title">${g.title}</div>
-                        <div class="game-meta">${ic('gift',13)} ${g.prize} · ${ic('users',13)} ${g.participants} · ${ic('clock',13)} ${timeLeft(g.ends_at)}</div>
+                        <div class="game-meta">${ic('users',13)} ${g.participants} · ${ic('trophy',13)} ${g.winner_count} · ${ic('clock',13)} ${timeLeft(g.ends_at)}</div>
                     </div>
                     <span class="game-badge badge-active">${t('active')}</span>
                 </div>
+                ${postPreview ? `<p style="font-size:12.5px;color:var(--text-hint);margin-top:8px;line-height:1.45;">${postPreview}${postPreview.length >= 120 ? '...' : ''}</p>` : ''}
+                ${g.prize ? `<div style="margin-top:6px;font-size:12px;color:var(--gold);font-weight:600;">${ic('gift',13)} ${g.prize}</div>` : ''}
+                ${channelHtml}
                 <button class="btn btn-primary" style="margin-top:11px;padding:11px;font-size:13.5px;" onclick="event.stopPropagation();quickJoinGiveaway(${g.id},this)">${ic('dice',17)} ${t('join_btn')}</button>
             </div>`;
         });
@@ -896,15 +915,18 @@ async function renderHome() {
     } else {
         contests.forEach(c => {
             const statusLabel = c.status === 'accepting_submissions' ? t('accepting') : t('voting');
+            const postPreview = (c.post_text || c.description || '').replace(/<[^>]+>/g, '').substring(0, 100);
+
             html += `<div class="game-item" style="flex-direction:column;align-items:stretch;" onclick="openContest(${c.id})">
                 <div style="display:flex;align-items:center;gap:13px;width:100%;">
                     <div class="game-icon gold">${ic('medal')}</div>
                     <div class="game-info">
                         <div class="game-title">${c.title}</div>
-                        <div class="game-meta">${ic('upload',13)} ${c.submissions}${c.prize ? ` · ${ic('gift',13)} ${c.prize}` : ''}</div>
+                        <div class="game-meta">${ic('upload',13)} ${c.submissions} · ${ic('trophy',13)} ${c.winner_count}${c.prize ? ` · ${ic('gift',13)} ${c.prize}` : ''}</div>
                     </div>
                     <span class="game-badge badge-active">${statusLabel}</span>
                 </div>
+                ${postPreview ? `<p style="font-size:12.5px;color:var(--text-hint);margin-top:8px;line-height:1.45;">${postPreview}${postPreview.length >= 100 ? '...' : ''}</p>` : ''}
                 <button class="btn btn-primary" style="margin-top:11px;padding:11px;font-size:13.5px;" onclick="event.stopPropagation();openContest(${c.id})">${ic('medal',17)} ${t('join_btn')}</button>
             </div>`;
         });
@@ -946,6 +968,7 @@ async function openGiveaway(id) {
 
     const isEnded = data.status !== 'active';
     const needsSub = data.must_subscribe && data.must_subscribe.length > 0;
+    const postContent = (data.post_text || data.description || '').replace(/<[^>]+>/g, '');
 
     let html = `
     <div class="card">
@@ -953,7 +976,7 @@ async function openGiveaway(id) {
             <span class="back-btn" onclick="switchTab('home')">${ic('back')}</span>
             <div class="card-title" style="margin-bottom:0;"><span class="ci">${ic('gift')}</span>${data.title}</div>
         </div>
-        ${data.description ? `<p style="font-size:13px;color:var(--text-hint);margin-bottom:14px;line-height:1.5;">${data.description}</p>` : ''}
+        ${postContent ? `<p style="font-size:13.5px;color:var(--text);margin-bottom:14px;line-height:1.55;white-space:pre-wrap;">${postContent}</p>` : ''}
         <div class="stats-row">
             <div class="stat-box"><div class="stat-val">${data.participants || 0}</div><div class="stat-lbl">${t('gw_participants')}</div></div>
             <div class="stat-box"><div class="stat-val">${data.winner_count}</div><div class="stat-lbl">${t('gw_winners')}</div></div>
@@ -964,6 +987,20 @@ async function openGiveaway(id) {
         </div>` : ''}
         ${data.ends_at ? `<div style="font-size:13px;color:var(--text-hint);margin-bottom:14px;display:flex;align-items:center;gap:6px;">${ic('clock',14)} ${t('gw_ends')}: ${timeLeft(data.ends_at)}</div>` : ''}`;
 
+    // Show required channels (always visible, not just when missing)
+    const allChannels = data.required_channels || [];
+    if (allChannels.length) {
+        const condLabel = currentLang === 'uz' ? "📢 Qatnashish sharti — kanallarga obuna:" :
+            currentLang === 'ru' ? '📢 Условие участия — подписка:' : '📢 Joining condition — subscribe:';
+        html += `<div style="margin-bottom:14px;">
+            <p style="font-size:12.5px;font-weight:600;margin-bottom:8px;color:var(--text-hint);">${condLabel}</p>`;
+        allChannels.forEach(ch => {
+            const link = typeof ch === 'string' && ch.startsWith('@') ? `https://t.me/${ch.slice(1)}` : `https://t.me/c/${String(ch).replace('-100','')}`;
+            html += `<a href="${link}" target="_blank" class="sub-link">${ic('megaphone',17)} ${ch}</a>`;
+        });
+        html += `</div>`;
+    }
+
     if (isEnded) {
         html += `<div style="text-align:center;padding:18px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);">
             <p style="font-size:14px;font-weight:700;">${t('gw_ended')}</p>
@@ -972,15 +1009,9 @@ async function openGiveaway(id) {
     } else if (data.already_joined) {
         html += `<button class="btn btn-secondary" disabled>${ic('check',18)} ${t('joined_btn')}</button>`;
     } else if (needsSub) {
-        html += `<p style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--gold);display:flex;align-items:center;gap:6px;">${ic('info',15)} ${t('gw_subscribe_first')}</p>`;
-        data.must_subscribe.forEach(ch => {
-            const link = typeof ch === 'string' && ch.startsWith('@') ? `https://t.me/${ch.slice(1)}` : `https://t.me/c/${String(ch).replace('-100','')}`;
-            html += `<a href="${link}" target="_blank" class="sub-link">${ic('megaphone',17)} ${ch}</a>`;
-        });
-        html += `<button class="btn btn-primary" style="margin-top:12px;" onclick="joinGiveawayDetail(${data.id})">${ic('dice',18)} ${t('join_btn')}</button>`;
+        html += `<button class="btn btn-primary" id="gwJoinBtn" onclick="joinGiveawayDetail(${data.id})">${ic('dice',18)} ${t('join_btn')}</button>`;
     } else {
-        html += `<p style="font-size:13px;color:var(--text-hint);margin-bottom:12px;">${t('gw_join_prompt')}</p>
-            <button class="btn btn-primary" id="gwJoinBtn" onclick="joinGiveawayDetail(${data.id})">${ic('dice',18)} ${t('join_btn')}</button>`;
+        html += `<button class="btn btn-primary" id="gwJoinBtn" onclick="joinGiveawayDetail(${data.id})">${ic('dice',18)} ${t('join_btn')}</button>`;
     }
 
     html += '</div>';

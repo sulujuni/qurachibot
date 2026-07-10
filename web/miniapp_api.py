@@ -180,12 +180,14 @@ async def get_giveaway_info(
         "id": giveaway.id,
         "title": giveaway.title,
         "description": giveaway.description,
+        "post_text": giveaway.post_text,
         "prize": giveaway.prize,
         "winner_count": giveaway.winner_count,
         "status": giveaway.status.value,
         "participants": participant_count,
         "already_joined": already_joined,
         "must_subscribe": must_subscribe,
+        "required_channels": required_channels or [],
         "ends_at": giveaway.ends_at.isoformat() if giveaway.ends_at else None,
         "winners_text": winners_text,
     }
@@ -352,6 +354,9 @@ async def miniapp_active_giveaways():
                 "id": gw.id,
                 "title": gw.title,
                 "prize": gw.prize,
+                "post_text": gw.post_text,
+                "description": gw.description,
+                "required_channels": gw.required_channels,
                 "participants": count,
                 "winner_count": gw.winner_count,
                 "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
@@ -848,6 +853,7 @@ async def miniapp_active_contests():
             )).scalar() or 0
             items.append({
                 "id": ct.id, "title": ct.title, "prize": ct.prize,
+                "post_text": ct.post_text, "description": ct.description,
                 "status": ct.status.value, "type": ct.contest_type.value,
                 "submissions": sub_count, "winner_count": ct.winner_count,
                 "created_at": ct.created_at.isoformat() if ct.created_at else None,
