@@ -205,7 +205,37 @@ echo "☁️  Starting Cloudflare tunnel (localhost:8090)..."
 cloudflared tunnel --url http://localhost:8090 > cloudflared.log 2>&1 &
 CLOUDFLARED_PID=$!
 echo "$CLOUDFLARED_PID" >> "$PID_FILE"
-sleep 3
+
+# Wait for the tunnel URL to appear in the log (up to 15 seconds)
+echo "⏳ Waiting for tunnel URL..."
+TUNNEL_URL=""
+for i in $(seq 1 30); do
+    sleep 0.5
+    TUNNEL_URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' cloudflared.log 2>/dev/null | head -1)
+    if [ -n "$TUNNEL_URL" ]; then
+        break
+    fi
+done
+
+if [ -n "$TUNNEL_URL" ]; then
+    echo "✅ Tunnel URL: $TUNNEL_URL"
+
+    # Auto-update WEB_URL in .env
+    if [ -f .env ]; then
+        if grep -q "^WEB_URL=" .env; then
+            sed -i "s|^WEB_URL=.*|WEB_URL=$TUNNEL_URL|" .env
+        else
+            echo "WEB_URL=$TUNNEL_URL" >> .env
+        fi
+        echo "📝 Updated WEB_URL in .env"
+    fi
+
+    # Export for the bot process
+    export WEB_URL="$TUNNEL_URL"
+else
+    echo "⚠️  Could not detect tunnel URL (check cloudflared.log)"
+    echo "    Bot will use existing WEB_URL from .env"
+fi
 
 # ─── Start services ───────────────────────────────────────
 start_services
@@ -227,11 +257,13 @@ echo ""
 echo "═══════════════════════════════════════════════════"
 echo "  🎲 Qurachi Bot is running!"
 echo ""
+if [ -n "$TUNNEL_URL" ]; then
+echo "  ☁️  Tunnel:   $TUNNEL_URL"
+echo "  📱 Mini App: $TUNNEL_URL/miniapp"
+else
 echo "  🌐 Domain:   https://qurachi.mooo.com"
-echo "  🤖 Webhook:  https://qurachi.mooo.com/telegram"
 echo "  📱 Mini App: https://qurachi.mooo.com/miniapp"
-echo ""
-echo "  Caddy handles HTTPS automatically (Let's Encrypt)"
+fi
 echo ""
 echo "  🔄 Auto-update: daily at ${CFG_HOUR}:$(printf '%02d' $CFG_MIN) (±${CFG_JITTER}min jitter)"
 echo "     Enabled: $CFG_ENABLED"
@@ -239,7 +271,6 @@ echo "     Config:  $CONFIG_FILE"
 echo "     Logs:    $LOG_FILE"
 echo ""
 echo "  Press Ctrl+C to stop bot + web server + updater"
-echo "  (Caddy keeps running as a system service)"
 echo "═══════════════════════════════════════════════════"
 echo ""
 
