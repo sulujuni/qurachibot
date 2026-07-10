@@ -168,7 +168,7 @@ async def api_giveaways():
             "id": gw.id,
             "title": gw.title,
             "prize": gw.prize,
-            "status": gw.status.value,
+            "status": gw.status,
             "participants": len(gw.participants),
             "winner_count": gw.winner_count,
             "created_at": gw.created_at.isoformat() if gw.created_at else None,
