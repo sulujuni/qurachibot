@@ -48,7 +48,7 @@ class Giveaway(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<Giveaway(id={self.id}, title='{self.title}', status={self.status.value})>"
+        return f"<Giveaway(id={self.id}, title='{self.title}', status={self.status})>"
 
 
 class GiveawayParticipant(Base):
