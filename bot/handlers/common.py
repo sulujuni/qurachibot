@@ -394,8 +394,142 @@ async def menu_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '⚙️ Settings' button tap — show language selector."""
-    await lang_command(update, context)
+    """Handle '⚙️ Settings' button tap — show full settings hub with inline buttons."""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    await _show_settings_hub(context.bot, update.effective_chat.id, user_id, lang)
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /settings command — same as menu_settings."""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    await _show_settings_hub(context.bot, update.effective_chat.id, user_id, lang)
+
+
+async def _show_settings_hub(bot, chat_id, user_id, lang):
+    """Build and send the settings hub inline keyboard."""
+    from bot.models.notification import AlertSubscription
+    from bot.models.user_settings import UserSettings
+    from sqlalchemy import select
+
+    # Fetch current states
+    alerts_on = False
+    captcha_verified = False
+    async with async_session() as session:
+        sub = (await session.execute(
+            select(AlertSubscription).where(AlertSubscription.user_id == user_id)
+        )).scalar_one_or_none()
+        alerts_on = sub is not None
+
+        us = (await session.execute(
+            select(UserSettings).where(UserSettings.user_id == user_id)
+        )).scalar_one_or_none()
+        captcha_verified = us.captcha_verified if us else False
+
+    # Build text
+    lang_names = {"uz": "🇺🇿 O'zbekcha", "ru": "🇷🇺 Русский", "en": "🇬🇧 English"}
+    headers = {
+        "uz": "⚙️ <b>Sozlamalar</b>",
+        "ru": "⚙️ <b>Настройки</b>",
+        "en": "⚙️ <b>Settings</b>",
+    }
+    text = headers.get(lang, headers["uz"])
+    text += f"\n\n🌐 {get_text('current_lang', lang=lang)}: {lang_names.get(lang, lang)}"
+    text += f"\n🔔 {'Bildirishnomalar' if lang == 'uz' else 'Уведомления' if lang == 'ru' else 'Notifications'}: {'✅' if alerts_on else '❌'}"
+    text += f"\n🔒 CAPTCHA: {'✅' if captcha_verified else '❌'}"
+
+    # Inline keyboard
+    alert_label = ("🔔 O'chirish" if alerts_on else "🔔 Yoqish") if lang == "uz" else ("🔔 Выкл" if alerts_on else "🔔 Вкл") if lang == "ru" else ("🔔 Disable" if alerts_on else "🔔 Enable")
+    lang_label = "🌐 Til / Язык" if lang == "uz" else "🌐 Язык" if lang == "ru" else "🌐 Language"
+    channels_label = "📢 Kanallarim" if lang == "uz" else "📢 Мои каналы" if lang == "ru" else "📢 My Channels"
+    joinfilter_label = "🚪 Join filter" if lang == "uz" else "🚪 Заявки" if lang == "ru" else "🚪 Join Requests"
+    defaults_label = "🎨 Standart sozlamalar" if lang == "uz" else "🎨 По умолчанию" if lang == "ru" else "🎨 Creator Defaults"
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(lang_label, callback_data="settings_lang"),
+         InlineKeyboardButton(alert_label, callback_data="settings_alerts")],
+        [InlineKeyboardButton(channels_label, callback_data="settings_channels"),
+         InlineKeyboardButton(joinfilter_label, callback_data="settings_joinfilter")],
+        [InlineKeyboardButton(defaults_label, callback_data="settings_defaults")],
+    ])
+
+    await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle settings hub button presses."""
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    lang = await get_user_lang(user_id)
+    action = query.data.split("_")[1]  # settings_<action>
+
+    if action == "lang":
+        # Show language selection inline
+        lang_buttons = []
+        for code, name in LANG_NAMES.items():
+            prefix = "✅ " if code == lang else ""
+            lang_buttons.append(InlineKeyboardButton(f"{prefix}{name}", callback_data=f"setlang_{code}"))
+        kb = InlineKeyboardMarkup([lang_buttons])
+        await query.edit_message_text("🌐 " + get_text("lang_title", lang=lang), reply_markup=kb)
+
+    elif action == "alerts":
+        # Toggle alerts
+        from bot.models.notification import AlertSubscription
+        from sqlalchemy import select
+        async with async_session() as session:
+            result = await session.execute(
+                select(AlertSubscription).where(AlertSubscription.user_id == user_id)
+            )
+            sub = result.scalar_one_or_none()
+            if sub:
+                await session.delete(sub)
+                msg = "🔕 " + ("O'chirildi" if lang == "uz" else "Выключено" if lang == "ru" else "Disabled")
+            else:
+                session.add(AlertSubscription(user_id=user_id))
+                msg = "🔔 " + ("Yoqildi" if lang == "uz" else "Включено" if lang == "ru" else "Enabled")
+            await session.commit()
+        await query.answer(msg, show_alert=True)
+        # Re-show settings
+        await _show_settings_hub(context.bot, query.message.chat_id, user_id, lang)
+        try:
+            await query.delete_message()
+        except Exception:
+            pass
+
+    elif action == "channels":
+        from bot.handlers.giveaway import my_channels_command
+        # Send channels list (can't edit into it because it's complex)
+        await query.delete_message()
+        # Simulate /mychannels by calling it
+        update.message = query.message  # Hack for reply context
+        await my_channels_command(update, context)
+
+    elif action == "joinfilter":
+        await query.delete_message()
+        await menu_joinfilter(update, context)
+
+    elif action == "defaults":
+        # Show creator defaults (button label + boost channels)
+        defaults_text = {
+            "uz": "🎨 <b>Yaratuvchi standart sozlamalari</b>\n\n"
+                  "Bu yerda kelajakdagi o'yinlar uchun standart qiymatlarni sozlashingiz mumkin.\n\n"
+                  "• Tugma matni: /edit orqali har bir o'yinda o'zgartiring\n"
+                  "• Bonus kanallar: /newgiveaway yaratishda qo'shing\n\n"
+                  "💡 Hozircha har bir o'yinda alohida sozlanadi.",
+            "ru": "🎨 <b>Настройки по умолчанию</b>\n\n"
+                  "Здесь можно настроить значения по умолчанию.\n\n"
+                  "• Текст кнопки: меняйте через /edit\n"
+                  "• Бонусные каналы: добавляйте при создании\n\n"
+                  "💡 Пока настраивается индивидуально для каждой игры.",
+            "en": "🎨 <b>Creator Defaults</b>\n\n"
+                  "Configure default values for future games.\n\n"
+                  "• Button label: change via /edit per game\n"
+                  "• Boost channels: add during creation\n\n"
+                  "💡 Currently set per-game individually.",
+        }
+        await query.edit_message_text(defaults_text.get(lang, defaults_text["uz"]), parse_mode="HTML")
 
 
 async def menu_report_bug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -942,7 +1076,9 @@ def get_common_handlers() -> list:
         CommandHandler("mygiveaways", mygames_command),
         CommandHandler("leaderboard", leaderboard_command),
         CommandHandler("lang", lang_command),
+        CommandHandler("settings", settings_command),
         CallbackQueryHandler(lang_callback, pattern=r"^setlang_"),
+        CallbackQueryHandler(settings_callback, pattern=r"^settings_"),
         # Gender callback from /start captcha flow
         CallbackQueryHandler(handle_gender_callback, pattern=r"^gender_(male|female)$"),
         # Join filter setup callbacks

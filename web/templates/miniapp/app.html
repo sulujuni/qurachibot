@@ -1640,6 +1640,20 @@ function renderCreateForm() {
             <input type="checkbox" id="cIsTest" style="width:20px;height:20px;flex-shrink:0;">
             <label for="cIsTest" style="font-size:13px;font-weight:600;cursor:pointer;">${currentLang==='uz'?"🧪 Test rejim (foydalanuvchilarga xabar bermaydi)":currentLang==='ru'?'🧪 Тест (не уведомлять пользователей)':'🧪 Test mode (no notifications)'}</label>
         </div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?'🔘 Tugma matni':currentLang==='ru'?'🔘 Текст кнопки':'🔘 Button label'}</label>
+            <select class="form-select" id="cButtonLabel">
+                <option value="">${currentLang==='uz'?'Standart':'Default'}</option>
+                <option value="🎁 ${currentLang==='uz'?'Qatnashish!':currentLang==='ru'?'Участвовать!':'Participate!'}">🎁 ${currentLang==='uz'?'Qatnashish!':currentLang==='ru'?'Участвовать!':'Participate!'}</option>
+                <option value="💎 ${currentLang==='uz'?"Qo'shilish":currentLang==='ru'?'Вступить':'Join'}">💎 ${currentLang==='uz'?"Qo'shilish":currentLang==='ru'?'Вступить':'Join'}</option>
+                <option value="🍀 ${currentLang==='uz'?'Men ham!':currentLang==='ru'?'Я в деле!':'I\\'m in!'}">🍀 ${currentLang==='uz'?'Men ham!':currentLang==='ru'?'Я в деле!':'I\\'m in!'}</option>
+                <option value="custom">${currentLang==='uz'?"O'zim yozaman":currentLang==='ru'?'Написать своё':'Custom'}</option>
+            </select>
+            <input class="form-input hidden" id="cButtonLabelCustom" placeholder="${currentLang==='uz'?'Tugma matnini kiriting':'Type button text'}" style="margin-top:6px;">
+        </div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?"⚡️ Bonus kanallar (ixtiyoriy, maks 3)":currentLang==='ru'?'⚡️ Бонусные каналы (необяз., макс 3)':'⚡️ Boost channels (optional, max 3)'}</label>
+            <input class="form-input" id="cBoostChannels" placeholder="@channel1, @channel2, @channel3">
+            <div class="form-hint">${currentLang==='uz'?"Ishtirokchilar har bir bonus kanalga obuna bo'lsa qo'shimcha imkoniyat oladi":currentLang==='ru'?'Участники получают доп. шансы за подписку':'Participants get extra entries for each boost subscription'}</div>
+        </div>
         <div class="form-group"><label class="form-label">${t('f_duration')}</label>
             <select class="form-select" id="cDuration">${durationOptions()}</select></div>
         <div class="form-group hidden" id="gwDeadlineBox"><label class="form-label">${t('f_deadline')}</label>
@@ -1802,6 +1816,12 @@ async function loadChannelPicker() {
             container.innerHTML = html;
         }
     } catch(e) {}
+    // Setup button label custom toggle
+    const btnSel = document.getElementById('cButtonLabel');
+    const btnCustom = document.getElementById('cButtonLabelCustom');
+    if (btnSel && btnCustom) {
+        btnSel.onchange = () => btnCustom.classList.toggle('hidden', btnSel.value !== 'custom');
+    }
 }
 
 async function submitContest() {
@@ -1818,6 +1838,17 @@ async function submitContest() {
         duration = null;
     }
 
+    // Get button label
+    let buttonLabel = null;
+    const btnSelect = document.getElementById('cButtonLabel');
+    if (btnSelect) {
+        if (btnSelect.value === 'custom') {
+            buttonLabel = document.getElementById('cButtonLabelCustom')?.value.trim() || null;
+        } else if (btnSelect.value) {
+            buttonLabel = btnSelect.value;
+        }
+    }
+
     const body = {
         post_text: postText,
         post_file_id: uploadedFileId || null,
@@ -1825,6 +1856,8 @@ async function submitContest() {
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         add_join_button: addJoinBtn,
         is_test: document.getElementById('cIsTest')?.checked || false,
+        button_label: buttonLabel,
+        boost_channels: document.getElementById('cBoostChannels')?.value.trim() || null,
         duration: duration,
         deadline: deadline,
         scheduled_start: document.getElementById('cStartTime')?.value || null,
