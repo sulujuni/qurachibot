@@ -610,7 +610,16 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         participants = giveaway.participants
         if not participants:
+            giveaway.status = GiveawayStatus.COMPLETED
+            giveaway.drawn_at = datetime.utcnow()
+            await session.commit()
             await update.message.reply_text(get_text("gw_no_participants", lang=lang))
+            # Also announce in channel
+            try:
+                ch = giveaway.channel_id or giveaway.chat_id
+                await context.bot.send_message(ch, f"❌ <b>{giveaway.title}</b> — ishtirokchilar yo'q.", parse_mode="HTML")
+            except Exception:
+                pass
             return
 
         winner_count = min(giveaway.winner_count, len(participants))
@@ -633,6 +642,40 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"🏆 {i+1}. {_format_user(w)}" for i, w in enumerate(winners)
     )
 
+    # Public announcement with tg://user mention links
+    mention_text = "\n".join(
+        f'🏆 {i+1}. <a href="tg://user?id={w.user_id}">{w.first_name or w.username or "User"}</a>'
+        for i, w in enumerate(winners)
+    )
+
+    # 1. Announce in the channel (public)
+    announce_channel = giveaway.channel_id or giveaway.chat_id
+    try:
+        await context.bot.send_message(
+            announce_channel,
+            f"🎊 <b>{giveaway.title}</b>\n\n"
+            f"👤 Ishtirokchilar: {len(participants)}\n\n"
+            f"<b>🏆 G'oliblar:</b>\n{mention_text}\n\n"
+            f"Tabriklaymiz! 🎉",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.warning(f"Could not announce in channel {announce_channel}: {e}")
+
+    # 2. DM each winner
+    for w in winners:
+        try:
+            w_lang = await get_user_lang(w.user_id)
+            win_msgs = {
+                "uz": f"🎉 <b>Tabriklaymiz!</b>\n\n<b>{giveaway.title}</b> o'yinida g'olib bo'ldingiz!\n🎁 {giveaway.prize or ''}\n\nTashkilotchi bilan bog'laning!",
+                "ru": f"🎉 <b>Поздравляем!</b>\n\nВы победили: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
+                "en": f"🎉 <b>Congratulations!</b>\n\nYou won: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
+            }
+            await context.bot.send_message(w.user_id, win_msgs.get(w_lang, win_msgs["uz"]), parse_mode="HTML")
+        except Exception:
+            pass
+
+    # 3. Confirm to creator
     result_text = get_text(
         "gw_results", lang=lang,
         title=giveaway.title,
