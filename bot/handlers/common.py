@@ -790,6 +790,14 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
         await edit_field_value(update, context)
         return
 
+    # Auto-detect forwarded channel messages → save channel
+    if update.message and hasattr(update.message, 'forward_origin') and update.message.forward_origin:
+        fo = update.message.forward_origin
+        if hasattr(fo, 'chat') and fo.chat and str(fo.chat.type) == 'ChatType.CHANNEL':
+            from bot.handlers.giveaway import my_channels_forward_handler
+            await my_channels_forward_handler(update, context)
+            return
+
     # Bug report: save user's message as feedback
     if context.user_data.get("awaiting_bug_report"):
         context.user_data.pop("awaiting_bug_report", None)

@@ -1071,6 +1071,164 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
             await _show_edit_summary(context.bot, query.message.chat_id, gw, lang)
 
 
+# ─── My Channels ──────────────────────────────────────────────────────────────
+
+
+async def my_channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show user's saved channels + add new channel button. Command: /mychannels"""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    bot_username = (await context.bot.get_me()).username
+
+    # Fetch saved channels
+    async with async_session() as session:
+        from sqlalchemy import and_
+        result = await session.execute(
+            select(UserChannel).where(UserChannel.user_id == user_id)
+            .order_by(UserChannel.added_at.desc())
+        )
+        channels = result.scalars().all()
+
+    headers = {
+        "uz": "📢 <b>Mening kanallarim</b>\n\nBot admin bo'lgan kanallar ro'yxati:",
+        "ru": "📢 <b>Мои каналы</b>\n\nСписок каналов, где бот является админом:",
+        "en": "📢 <b>My Channels</b>\n\nChannels where bot is admin:",
+    }
+    text = headers.get(lang, headers["uz"])
+
+    if channels:
+        for i, ch in enumerate(channels, 1):
+            name = ch.chat_title or str(ch.chat_id)
+            username = f" (@{ch.chat_username})" if ch.chat_username else ""
+            text += f"\n{i}. <b>{name}</b>{username}\n   ID: <code>{ch.chat_id}</code>"
+    else:
+        empty = {
+            "uz": "\n\n📭 Hali kanal qo'shilmagan.\nPastdagi tugma orqali botni kanalingizga admin qiling.",
+            "ru": "\n\n📭 Каналов пока нет.\nДобавьте бота как админа через кнопку ниже.",
+            "en": "\n\n📭 No channels yet.\nAdd the bot as admin using the button below.",
+        }
+        text += empty.get(lang, empty["uz"])
+
+    # Buttons: Add to channel + Add to group
+    add_labels = {
+        "uz": ("➕ Kanalga qo'shish", "➕ Guruhga qo'shish", "🔄 Yangilash"),
+        "ru": ("➕ Добавить в канал", "➕ В группу", "🔄 Обновить"),
+        "en": ("➕ Add to channel", "➕ Add to group", "🔄 Refresh"),
+    }
+    ch_label, gr_label, ref_label = add_labels.get(lang, add_labels["uz"])
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(ch_label, url=f"https://t.me/{bot_username}?startchannel&admin=post_messages+edit_messages+delete_messages+invite_users")],
+        [InlineKeyboardButton(gr_label, url=f"https://t.me/{bot_username}?startgroup=true&admin=post_messages+invite_users+manage_chat")],
+        [InlineKeyboardButton(ref_label, callback_data="mych_refresh")],
+    ])
+
+    text += "\n\n💡 " + (
+        "Bot kanalga qo'shilgandan keyin, o'sha kanaldan biror xabarni shu yerga forward qiling — avtomatik qo'shiladi."
+        if lang == "uz" else
+        "After adding bot, forward any message from that channel here — it will be saved automatically."
+    )
+
+    await update.message.reply_text(text, reply_markup=keyboard, parse_mode="HTML")
+
+
+async def my_channels_refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Refresh channels list — check which saved channels the bot is still admin of."""
+    query = update.callback_query
+    await query.answer("🔄")
+    user_id = query.from_user.id
+    lang = await get_user_lang(user_id)
+
+    # Verify each saved channel (remove ones where bot is no longer admin)
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserChannel).where(UserChannel.user_id == user_id)
+        )
+        channels = result.scalars().all()
+
+        removed = 0
+        for ch in channels:
+            try:
+                member = await context.bot.get_chat_member(ch.chat_id, context.bot.id)
+                if member.status not in ("administrator", "creator"):
+                    await session.delete(ch)
+                    removed += 1
+                else:
+                    # Update title
+                    try:
+                        chat_info = await context.bot.get_chat(ch.chat_id)
+                        ch.chat_title = chat_info.title
+                        ch.chat_username = chat_info.username
+                    except Exception:
+                        pass
+            except Exception:
+                await session.delete(ch)
+                removed += 1
+        await session.commit()
+
+    msg = f"🔄 Yangilandi! {f'{removed} ta olib tashlandi.' if removed else 'Hammasi joyida.'}" if lang == "uz" else f"🔄 Refreshed! {f'{removed} removed.' if removed else 'All good.'}"
+    await query.answer(msg, show_alert=True)
+
+
+async def my_channels_forward_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """When user forwards a message from a channel, auto-save that channel."""
+    message = update.message
+    if not message:
+        return
+
+    # Check forward_origin for channel
+    channel_id = None
+    channel_title = None
+
+    if hasattr(message, 'forward_origin') and message.forward_origin:
+        fo = message.forward_origin
+        if hasattr(fo, 'chat') and fo.chat:
+            channel_id = fo.chat.id
+            channel_title = fo.chat.title
+
+    if not channel_id:
+        return  # Not a forwarded channel message
+
+    user_id = message.from_user.id
+
+    # Verify bot is admin there
+    try:
+        member = await context.bot.get_chat_member(channel_id, context.bot.id)
+        if member.status not in ("administrator", "creator"):
+            lang = await get_user_lang(user_id)
+            await message.reply_text(
+                "❌ Bot bu kanalda admin emas. Avval botni admin qiling." if lang == "uz"
+                else "❌ Bot is not admin in this channel. Add bot as admin first."
+            )
+            return
+    except Exception:
+        return
+
+    # Save channel
+    async with async_session() as session:
+        from sqlalchemy import and_
+        existing = await session.execute(
+            select(UserChannel).where(and_(UserChannel.user_id == user_id, UserChannel.chat_id == channel_id))
+        )
+        if not existing.scalar_one_or_none():
+            try:
+                chat_info = await context.bot.get_chat(channel_id)
+                session.add(UserChannel(
+                    user_id=user_id, chat_id=channel_id,
+                    chat_title=chat_info.title, chat_username=chat_info.username,
+                ))
+            except Exception:
+                session.add(UserChannel(user_id=user_id, chat_id=channel_id, chat_title=channel_title))
+            await session.commit()
+
+    lang = await get_user_lang(user_id)
+    await message.reply_text(
+        f"✅ Kanal qo'shildi: <b>{channel_title}</b>\n\nEndi /newgiveaway orqali o'yin yaratishda shu kanal avtomatik taklif qilinadi."
+        if lang == "uz" else f"✅ Channel added: <b>{channel_title}</b>",
+        parse_mode="HTML",
+    )
+
+
 # ─── Cancel Giveaway ─────────────────────────────────────────────────────────────
 
 
@@ -1309,8 +1467,10 @@ def get_giveaway_handlers() -> list:
         CommandHandler("draw", draw_giveaway),
         CommandHandler("edit", edit_giveaway_command),
         CommandHandler("mygiveaways", my_giveaways),
+        CommandHandler("mychannels", my_channels_command),
         CommandHandler("cancelgiveaway", cancel_giveaway),
         CallbackQueryHandler(join_giveaway_callback, pattern=r"^join_gw_\d+$"),
         CallbackQueryHandler(edit_field_callback, pattern=r"^gwedit_"),
         CallbackQueryHandler(my_giveaways_nav_callback, pattern=r"^mygw_"),
+        CallbackQueryHandler(my_channels_refresh_callback, pattern=r"^mych_refresh$"),
     ]
