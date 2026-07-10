@@ -1144,18 +1144,51 @@ async function renderLeaders() {
     const el = document.getElementById('content');
     el.innerHTML = LOAD;
     const data = await api('/leaderboard');
+    const users = data.users || data || [];  // backwards compat
     let html = `<div class="card"><div class="card-title gold"><span class="ci">${ic('trophy')}</span>${t('leaderboard_title')}</div>`;
-    if (!data.length) {
+
+    // User's own rank card (if available)
+    if (data.my_rank && data.my_data) {
+        const myLabel = currentLang === 'uz' ? "Sizning o'rningiz" : currentLang === 'ru' ? 'Ваша позиция' : 'Your rank';
+        html += `<div style="background:var(--primary-soft);border:1px solid rgba(99,102,241,0.25);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;display:flex;align-items:center;gap:12px;">
+            <div style="font-size:22px;font-weight:800;color:var(--primary-2);">#${data.my_rank}</div>
+            <div style="flex:1;">
+                <div style="font-size:12px;color:var(--text-hint);">${myLabel}</div>
+                <div style="font-size:14px;font-weight:700;">${data.my_data.points} ${t('pts')} · ${ic('trophy',13)} ${data.my_data.wins} · ${ic('users',13)} ${data.my_data.referrals} · ${ic('dice',13)} ${data.my_data.games_joined}</div>
+            </div>
+        </div>`;
+    }
+
+    if (!users.length) {
         html += emptyState('trophy', t('no_leaderboard'));
     } else {
-        data.forEach((u, i) => {
+        // Column headers
+        const hdrPts = currentLang === 'uz' ? 'Ball' : currentLang === 'ru' ? 'Баллы' : 'Pts';
+        const hdrWins = currentLang === 'uz' ? 'Yutish' : currentLang === 'ru' ? 'Побед' : 'Wins';
+        const hdrRef = currentLang === 'uz' ? 'Ref' : currentLang === 'ru' ? 'Реф' : 'Ref';
+        const hdrGames = currentLang === 'uz' ? "O'yin" : currentLang === 'ru' ? 'Игр' : 'Games';
+
+        html += `<div style="display:flex;padding:6px 13px;font-size:10px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;gap:8px;">
+            <span style="width:34px;"></span><span style="flex:1;"></span>
+            <span style="width:45px;text-align:center;">${hdrPts}</span>
+            <span style="width:35px;text-align:center;">${hdrWins}</span>
+            <span style="width:30px;text-align:center;">${hdrRef}</span>
+            <span style="width:35px;text-align:center;">${hdrGames}</span>
+        </div>`;
+
+        users.forEach((u, i) => {
             const rank = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
             const rankInner = i < 3 ? ic(i === 0 ? 'trophy' : 'medal', 19) : (i + 1);
             const name = u.username ? `@${u.username}` : (u.first_name || '?');
-            html += `<div class="lb-item${i < 3 ? ' top' : ''}">
+            const isMe = u.is_me;
+
+            html += `<div class="lb-item${i < 3 ? ' top' : ''}" ${isMe ? 'style="border-color:var(--primary);background:var(--primary-soft);"' : ''}>
                 <div class="lb-rank ${rank}">${rankInner}</div>
-                <div class="lb-name">${name}</div>
-                <div class="lb-pts">${ic('coins',14)} ${u.points}</div>
+                <div class="lb-name">${name}${isMe ? ' ✦' : ''}</div>
+                <span style="width:45px;text-align:center;font-weight:700;color:var(--gold);font-size:13px;">${u.points}</span>
+                <span style="width:35px;text-align:center;font-size:12px;color:var(--text-hint);">${u.wins}</span>
+                <span style="width:30px;text-align:center;font-size:12px;color:var(--text-hint);">${u.referrals}</span>
+                <span style="width:35px;text-align:center;font-size:12px;color:var(--text-hint);">${u.games_joined}</span>
             </div>`;
         });
     }

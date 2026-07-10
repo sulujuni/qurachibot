@@ -366,24 +366,72 @@ async def miniapp_active_giveaways():
 
 
 @router.get("/leaderboard")
-async def miniapp_leaderboard():
-    """Top users for the leaderboard tab."""
+async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
+    """Top users for the leaderboard tab — enriched with all stats."""
     from bot.models.loyalty import LoyaltyPoints
+
+    user = None
+    user_id = None
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+        user_id = user["id"]
+    except Exception:
+        pass
+
     async with async_session() as session:
         result = await session.execute(
             select(LoyaltyPoints).order_by(LoyaltyPoints.total_earned.desc()).limit(30)
         )
         users = result.scalars().all()
-    return [
-        {
-            "rank": i + 1,
-            "username": u.username,
-            "first_name": u.first_name,
-            "points": u.total_earned or 0,
-            "wins": u.wins or 0,
-        }
-        for i, u in enumerate(users)
-    ]
+
+        # Find the requesting user's rank if not in top 30
+        my_rank = None
+        my_data = None
+        if user_id:
+            for i, u in enumerate(users):
+                if u.user_id == user_id:
+                    my_rank = i + 1
+                    my_data = u
+                    break
+            if my_rank is None:
+                # User not in top 30, find their actual rank
+                rank_result = await session.execute(
+                    select(func.count(LoyaltyPoints.id)).where(
+                        LoyaltyPoints.total_earned > (
+                            select(LoyaltyPoints.total_earned).where(LoyaltyPoints.user_id == user_id).scalar_subquery()
+                        )
+                    )
+                )
+                rank_above = rank_result.scalar() or 0
+                my_rank = rank_above + 1
+                user_result = await session.execute(
+                    select(LoyaltyPoints).where(LoyaltyPoints.user_id == user_id)
+                )
+                my_data = user_result.scalar_one_or_none()
+
+    return {
+        "users": [
+            {
+                "rank": i + 1,
+                "user_id": u.user_id,
+                "username": u.username,
+                "first_name": u.first_name,
+                "points": u.total_earned or 0,
+                "wins": u.wins or 0,
+                "referrals": u.referrals_made or 0,
+                "games_joined": (u.giveaways_joined or 0) + (u.contests_joined or 0),
+                "is_me": u.user_id == user_id if user_id else False,
+            }
+            for i, u in enumerate(users)
+        ],
+        "my_rank": my_rank,
+        "my_data": {
+            "points": my_data.total_earned or 0,
+            "wins": my_data.wins or 0,
+            "referrals": my_data.referrals_made or 0,
+            "games_joined": (my_data.giveaways_joined or 0) + (my_data.contests_joined or 0),
+        } if my_data else None,
+    }
 
 
 @router.get("/my-games")
