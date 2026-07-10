@@ -20,21 +20,24 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
     menus = {
         "uz": [
             ["🎲 O'yin yaratish", "📋 Mening o'yinlarim"],
+            ["📢 Kanallarim", "✏️ Tahrirlash"],
             ["🏆 Reyting", "👥 Do'st taklif qilish"],
-            ["🚪 So'rovlarni boshqarish", "⚙️ Sozlamalar"],
-            ["🐛 Xatolik xabar qilish"],
+            ["🚪 So'rovlarni boshqarish", "📣 Xabar yuborish"],
+            ["⚙️ Sozlamalar", "🐛 Xatolik xabar qilish"],
         ],
         "ru": [
             ["🎲 Создать игру", "📋 Мои игры"],
+            ["📢 Мои каналы", "✏️ Редактировать"],
             ["🏆 Рейтинг", "👥 Пригласить друга"],
-            ["🚪 Управление заявками", "⚙️ Настройки"],
-            ["🐛 Сообщить об ошибке"],
+            ["🚪 Управление заявками", "📣 Уведомить"],
+            ["⚙️ Настройки", "🐛 Сообщить об ошибке"],
         ],
         "en": [
             ["🎲 Create Game", "📋 My Games"],
+            ["📢 My Channels", "✏️ Edit"],
             ["🏆 Leaderboard", "👥 Invite Friends"],
-            ["🚪 Join Requests", "⚙️ Settings"],
-            ["🐛 Report Bug"],
+            ["🚪 Join Requests", "📣 Notify"],
+            ["⚙️ Settings", "🐛 Report Bug"],
         ],
     }
     buttons = menus.get(lang, menus["uz"])
@@ -553,6 +556,24 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                   "💡 Currently set per-game individually.",
         }
         await query.edit_message_text(defaults_text.get(lang, defaults_text["uz"]), parse_mode="HTML")
+
+
+async def menu_my_channels(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '📢 My Channels' button tap."""
+    from bot.handlers.giveaway import my_channels_command
+    await my_channels_command(update, context)
+
+
+async def menu_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '✏️ Edit' button tap — show editable giveaways."""
+    from bot.handlers.giveaway import edit_giveaway_command
+    await edit_giveaway_command(update, context)
+
+
+async def menu_notify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '📣 Notify' button tap — start notify flow."""
+    from bot.handlers.giveaway import notify_start
+    await notify_start(update, context)
 
 
 async def menu_report_bug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1111,6 +1132,9 @@ def get_common_handlers() -> list:
         # Reply keyboard button handlers (all 3 languages)
         MessageHandler(filters.Regex(r"^(🎲 O'yin yaratish|🎲 Создать игру|🎲 Create Game|🎲 Yutuqli o'yin yaratish|🎲 Создать розыгрыш|🎲 Create Giveaway)$"), menu_create_giveaway),
         MessageHandler(filters.Regex(r"^(📋 Mening o'yinlarim|📋 Мои игры|📋 My Games|📋 Мои розыгрыши|📋 My Giveaways)$"), menu_my_giveaways),
+        MessageHandler(filters.Regex(r"^(📢 Kanallarim|📢 Мои каналы|📢 My Channels)$"), menu_my_channels),
+        MessageHandler(filters.Regex(r"^(✏️ Tahrirlash|✏️ Редактировать|✏️ Edit)$"), menu_edit),
+        MessageHandler(filters.Regex(r"^(📣 Xabar yuborish|📣 Уведомить|📣 Notify)$"), menu_notify),
         MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
         MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
