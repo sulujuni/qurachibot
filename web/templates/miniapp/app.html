@@ -1249,9 +1249,8 @@ async function submitCommentGiveaway() {
     };
     const res = await api('/create-comment-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast(t('gw_created_success'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-    switchTab('home');
+    showCreatedSharePrompt(res.id, 'gg');
 }
 
 async function submitContest() {
@@ -1279,9 +1278,36 @@ async function submitContest() {
     };
     const res = await api('/create-contest', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
-    showToast(t('gw_created_success'));
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-    switchTab('home');
+    showCreatedSharePrompt(res.id, 'ct');
+}
+
+function showCreatedSharePrompt(gameId, gameType) {
+    const el = document.getElementById('content');
+    const botUser = 'qurachibot';  // TODO: get from API
+    const deepLink = `https://t.me/${botUser}?start=${gameType}_${gameId}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(t('gw_created_success'))}`;
+
+    const shareLabel = currentLang === 'uz' ? "📢 Kanalga/Guruhga ulashish" :
+        currentLang === 'ru' ? '📢 Поделиться в канал/группу' : '📢 Share to channel/group';
+    const copyLabel = currentLang === 'uz' ? "🔗 Havolani nusxalash" :
+        currentLang === 'ru' ? '🔗 Скопировать ссылку' : '🔗 Copy link';
+    const doneLabel = currentLang === 'uz' ? "✅ Tayyor" :
+        currentLang === 'ru' ? '✅ Готово' : '✅ Done';
+
+    el.innerHTML = `
+    <div class="card hero" style="text-align:center;">
+        <div style="font-size:48px;margin-bottom:16px;">${ic('checkCircle', 48)}</div>
+        <div style="font-size:18px;font-weight:800;margin-bottom:8px;">${t('gw_created_success')}</div>
+        <p style="font-size:13px;color:var(--text-hint);margin-bottom:20px;">
+            ${currentLang === 'uz' ? "Endi o'yinni kanalingizga yoki guruhingizga ulashing:" :
+              currentLang === 'ru' ? 'Теперь поделитесь игрой в канал или группу:' :
+              'Now share the game to your channel or group:'}
+        </p>
+        <a href="${shareUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none;margin-bottom:10px;">${shareLabel}</a>
+        <button class="btn btn-secondary" style="margin-top:0;" onclick="navigator.clipboard.writeText('${deepLink}');showToast(t('copied'));">${copyLabel}</button>
+        <button class="btn btn-secondary" style="margin-top:10px;opacity:0.7;" onclick="switchTab('home')">${doneLabel}</button>
+    </div>`;
 }
 
 async function sendBroadcast() {

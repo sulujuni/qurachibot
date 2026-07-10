@@ -54,6 +54,23 @@ def _format_name(entry) -> str:
     return entry.first_name or f"User {entry.user_id}"
 
 
+def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMarkup:
+    """Build share/forward buttons shown to creator after game creation."""
+    from bot.config import settings
+    bot_username = settings.BOT_USERNAME or "qurachibot"
+    deep_link = f"https://t.me/{bot_username}?start={game_type}_{game_id}"
+    labels = {
+        "uz": ("📢 Kanalga/Guruhga yuborish", "🔗 Havolani nusxalash"),
+        "ru": ("📢 Отправить в канал/группу", "🔗 Скопировать ссылку"),
+        "en": ("📢 Send to channel/group", "🔗 Copy link"),
+    }
+    share_label, link_label = labels.get(lang, labels["uz"])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(share_label, switch_inline_query_chosen_chat=f"{game_type}_{game_id}")],
+        [InlineKeyboardButton(link_label, url=deep_link)],
+    ])
+
+
 async def _resolve_giveaway_id(chat_id: int, message_id: int) -> int | None:
     """Look up a giveaway ID by chat_id + message_id.
 
@@ -332,6 +349,22 @@ async def _finalize_gg(query, context) -> int:
     if is_channel:
         _channel_post_giveaways[(chat_id, sent.message_id)] = giveaway.id
 
+    # Send share buttons to the creator (in private chat)
+    try:
+        share_kb = _share_keyboard("gg", giveaway.id, context.user_data.get("gg_lang", "en"))
+        share_texts = {
+            "uz": "✅ <b>O'yin yaratildi va joylandi!</b>",
+            "ru": "✅ <b>Игра создана и опубликована!</b>",
+            "en": "✅ <b>Game created and posted!</b>",
+        }
+        lang = context.user_data.get("gg_lang", "en")
+        await context.bot.send_message(
+            query.from_user.id, share_texts.get(lang, share_texts["uz"]),
+            reply_markup=share_kb, parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -369,7 +402,12 @@ async def _finalize_gg_msg(update: Update, context) -> int:
     if is_channel:
         _channel_post_giveaways[(chat_id, sent.message_id)] = giveaway.id
 
-    await update.message.reply_text(get_text("gg_created_success", lang=lang), parse_mode="HTML")
+    # Send share confirmation
+    share_kb = _share_keyboard("gg", giveaway.id, lang)
+    await update.message.reply_text(
+        get_text("gg_created_success", lang=lang),
+        reply_markup=share_kb, parse_mode="HTML",
+    )
     context.user_data.clear()
     return ConversationHandler.END
 

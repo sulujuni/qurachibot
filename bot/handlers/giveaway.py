@@ -54,6 +54,24 @@ def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineK
     return InlineKeyboardMarkup([[button]])
 
 
+def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMarkup:
+    """Build share/forward buttons shown to creator after game creation."""
+    bot_username = settings.BOT_USERNAME or "qurachibot"
+    deep_link = f"https://t.me/{bot_username}?start={game_type}_{game_id}"
+
+    labels = {
+        "uz": ("📢 Kanalga/Guruhga yuborish", "🔗 Havolani nusxalash"),
+        "ru": ("📢 Отправить в канал/группу", "🔗 Скопировать ссылку"),
+        "en": ("📢 Send to channel/group", "🔗 Copy link"),
+    }
+    share_label, link_label = labels.get(lang, labels["uz"])
+
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(share_label, switch_inline_query_chosen_chat=f"{game_type}_{game_id}")],
+        [InlineKeyboardButton(link_label, url=deep_link)],
+    ])
+
+
 def _extract_post_data(message) -> dict:
     """Extract text, file_id, and media_type from a Telegram message."""
     data = {"post_text": None, "post_file_id": None, "post_media_type": None}
@@ -282,6 +300,18 @@ async def _finalize_giveaway(query, context) -> int:
     # Send the admin's original post with Join button
     await send_giveaway_post(context.bot, query.message.chat_id, giveaway, join_keyboard)
 
+    # Send share buttons to the creator
+    share_kb = _share_keyboard("gw", giveaway.id, lang)
+    share_texts = {
+        "uz": "✅ <b>Yutuqli o'yin yaratildi!</b>\n\nEndi uni kanalingizga yuboring:",
+        "ru": "✅ <b>Розыгрыш создан!</b>\n\nТеперь отправьте его в канал:",
+        "en": "✅ <b>Giveaway created!</b>\n\nNow share it to your channel:",
+    }
+    await context.bot.send_message(
+        query.message.chat_id, share_texts.get(lang, share_texts["uz"]),
+        reply_markup=share_kb, parse_mode="HTML",
+    )
+
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -313,7 +343,18 @@ async def _finalize_giveaway_from_message(update: Update, context) -> int:
     # Send the admin's original post with Join button
     await send_giveaway_post(context.bot, update.effective_chat.id, giveaway, join_keyboard)
 
-    await update.message.reply_text(get_text("gw_created_success", lang=lang), parse_mode="HTML")
+    # Send share buttons to the creator
+    share_kb = _share_keyboard("gw", giveaway.id, lang)
+    share_texts = {
+        "uz": "✅ <b>Yutuqli o'yin yaratildi!</b>\n\nEndi uni kanalingizga yuboring:",
+        "ru": "✅ <b>Розыгрыш создан!</b>\n\nТеперь отправьте его в канал:",
+        "en": "✅ <b>Giveaway created!</b>\n\nNow share it to your channel:",
+    }
+    await update.message.reply_text(
+        share_texts.get(lang, share_texts["uz"]),
+        reply_markup=share_kb, parse_mode="HTML",
+    )
+
     context.user_data.clear()
     return ConversationHandler.END
 

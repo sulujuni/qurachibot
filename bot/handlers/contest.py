@@ -158,6 +158,30 @@ async def contest_winners_selected(update: Update, context: ContextTypes.DEFAULT
     # Send the admin's original post with submit/view buttons
     await _send_contest_post(context.bot, query.message.chat_id, contest, keyboard)
 
+    # Send share buttons to the creator
+    from bot.config import settings as _settings
+    bot_username = _settings.BOT_USERNAME or "qurachibot"
+    deep_link = f"https://t.me/{bot_username}?start=ct_{contest.id}"
+    share_labels = {
+        "uz": ("📢 Kanalga/Guruhga yuborish", "🔗 Havolani nusxalash"),
+        "ru": ("📢 Отправить в канал/группу", "🔗 Скопировать ссылку"),
+        "en": ("📢 Send to channel/group", "🔗 Copy link"),
+    }
+    sl, ll = share_labels.get(lang, share_labels["uz"])
+    share_kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(sl, switch_inline_query_chosen_chat=f"ct_{contest.id}")],
+        [InlineKeyboardButton(ll, url=deep_link)],
+    ])
+    share_texts = {
+        "uz": "✅ <b>Konkurs yaratildi!</b>\n\nEndi uni kanalingizga yuboring:",
+        "ru": "✅ <b>Конкурс создан!</b>\n\nТеперь отправьте его в канал:",
+        "en": "✅ <b>Contest created!</b>\n\nNow share it to your channel:",
+    }
+    await context.bot.send_message(
+        query.message.chat_id, share_texts.get(lang, share_texts["uz"]),
+        reply_markup=share_kb, parse_mode="HTML",
+    )
+
     context.user_data.clear()
     return ConversationHandler.END
 
