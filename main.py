@@ -23,6 +23,7 @@ from bot.jobs import (
     check_expired_giveaways,
     check_expired_group_giveaways,
     check_submission_deadlines,
+    publish_queued_giveaways,
     send_new_event_alerts,
     send_reminders,
 )
@@ -211,7 +212,9 @@ async def post_init(application: Application) -> None:
     # Schedule recurring jobs
     job_queue = application.job_queue
     if job_queue:
-        # Check expired giveaways every 60 seconds
+        # Publish queued giveaways every 10 seconds (scheduled start time)
+        job_queue.run_repeating(publish_queued_giveaways, interval=10, first=5)
+        # Check expired giveaways every 60 seconds (auto-draw at end time)
         job_queue.run_repeating(check_expired_giveaways, interval=60, first=10)
         # Check expired group/channel comment giveaways every 60 seconds
         job_queue.run_repeating(check_expired_group_giveaways, interval=60, first=20)

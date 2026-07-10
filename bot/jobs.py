@@ -29,6 +29,110 @@ def _format_winner(w, index: int) -> str:
     return f"🏆 {index}. {name}"
 
 
+def _mention_winner(w, index: int) -> str:
+    """Format winner with tg://user mention link (works for users without @username)."""
+    if w.username:
+        return f'🏆 {index}. <a href="https://t.me/{w.username}">@{w.username}</a>'
+    name = w.first_name or f"User {w.user_id}"
+    return f'🏆 {index}. <a href="tg://user?id={w.user_id}">{name}</a>'
+
+
+# ─── Scheduled Publish Timer ─────────────────────────────────────────────────
+
+
+async def publish_queued_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Publish QUEUED giveaways whose scheduled_start time has arrived.
+
+    Runs every 10 seconds. Moves giveaways from QUEUED → ACTIVE,
+    sends the post to the channel, and notifies the creator.
+    """
+    now = datetime.utcnow()
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(
+                Giveaway.status == GiveawayStatus.QUEUED,
+                Giveaway.scheduled_start <= now,
+                Giveaway.scheduled_start != None,
+            )
+        )
+        queued = result.scalars().all()
+
+    for gw in queued:
+        channel_id = gw.channel_id or gw.chat_id
+        lang = await get_user_lang(gw.creator_id)
+
+        # Build join button
+        from bot.config import settings
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+        join_label = f"🎮 {get_text('gw_join_button', lang=lang)} (0)"
+        web_url = settings.WEB_URL
+        if web_url:
+            url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={gw.id}"
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, web_app=WebAppInfo(url=url))]])
+        else:
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, callback_data=f"join_gw_{gw.id}")]])
+
+        # Send the post to the channel
+        try:
+            if gw.post_file_id and gw.post_media_type:
+                mt = gw.post_media_type
+                caption = gw.post_text or ""
+                if mt == "photo":
+                    msg = await context.bot.send_photo(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+                elif mt == "video":
+                    msg = await context.bot.send_video(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+                elif mt == "animation":
+                    msg = await context.bot.send_animation(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+                else:
+                    msg = await context.bot.send_document(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+            else:
+                msg = await context.bot.send_message(channel_id, gw.post_text or gw.title, parse_mode="HTML", reply_markup=kb)
+
+            # Update status to ACTIVE
+            async with async_session() as session:
+                result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
+                g = result.scalar_one()
+                g.status = GiveawayStatus.ACTIVE
+                g.published_at = now
+                g.message_id = msg.message_id
+                if not g.channel_id:
+                    g.channel_id = channel_id
+                await session.commit()
+
+            # Notify creator
+            try:
+                published_msg = {
+                    "uz": f"✅ <b>{gw.title}</b> kanalga muvaffaqiyatli joylandi!",
+                    "ru": f"✅ <b>{gw.title}</b> опубликован в канале!",
+                    "en": f"✅ <b>{gw.title}</b> published to channel!",
+                }
+                await context.bot.send_message(gw.creator_id, published_msg.get(lang, published_msg["uz"]), parse_mode="HTML")
+            except Exception:
+                pass
+
+            logger.info(f"Published queued giveaway {gw.id} to channel {channel_id}")
+
+        except Exception as e:
+            logger.error(f"Failed to publish queued giveaway {gw.id}: {e}")
+            # Notify creator about failure
+            try:
+                fail_msg = {
+                    "uz": f"❌ <b>{gw.title}</b> kanalga joylab bo'lmadi: {str(e)[:100]}",
+                    "ru": f"❌ Не удалось опубликовать <b>{gw.title}</b>: {str(e)[:100]}",
+                    "en": f"❌ Failed to publish <b>{gw.title}</b>: {str(e)[:100]}",
+                }
+                await context.bot.send_message(gw.creator_id, fail_msg.get(lang, fail_msg["uz"]), parse_mode="HTML")
+            except Exception:
+                pass
+            # Mark as cancelled so it doesn't retry forever
+            async with async_session() as session:
+                result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
+                g = result.scalar_one()
+                g.status = GiveawayStatus.CANCELLED
+                await session.commit()
+
+
 async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check for giveaways that have expired and auto-draw them."""
     import random
@@ -49,12 +153,25 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
 
         for giveaway in expired_giveaways:
             if not giveaway.participants:
-                giveaway.status = GiveawayStatus.CANCELLED
+                giveaway.status = GiveawayStatus.COMPLETED
+                giveaway.drawn_at = now
                 await session.commit()
+                # Announce "no winners" in channel
+                announce_channel = giveaway.channel_id or giveaway.chat_id
                 try:
                     await context.bot.send_message(
-                        giveaway.chat_id,
-                        f"❌ Giveaway <b>'{giveaway.title}'</b> expired with no participants.",
+                        announce_channel,
+                        f"❌ <b>{giveaway.title}</b>\n\n"
+                        f"Ishtirokchilar bo'lmaganligi sababli g'olib aniqlanmadi.",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
+                # Notify creator
+                try:
+                    await context.bot.send_message(
+                        giveaway.creator_id,
+                        f"❌ <b>{giveaway.title}</b> — ishtirokchilar bo'lmaganligi sababli tugadi.",
                         parse_mode="HTML",
                     )
                 except Exception:
@@ -78,34 +195,51 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
             giveaway.drawn_at = now
             await session.commit()
 
-            # Announce
+            # Announce winners publicly
             winners_text = "\n".join(
-                f"🏆 {i+1}. @{w.username}" if w.username else f"🏆 {i+1}. {w.first_name or f'User {w.user_id}'}"
-                for i, w in enumerate(winners)
+                _mention_winner(w, i+1) for i, w in enumerate(winners)
             )
+            # Announce in the channel where post was published
+            announce_channel = giveaway.channel_id or giveaway.chat_id
             try:
                 await context.bot.send_message(
-                    giveaway.chat_id,
-                    f"🎊 <b>AUTO-DRAW: {giveaway.title}</b>\n\n"
-                    f"🎁 Prize: {giveaway.prize}\n"
-                    f"👤 Participants: {len(giveaway.participants)}\n\n"
-                    f"<b>Winners:</b>\n{winners_text}\n\n"
-                    f"Congratulations! 🎉",
+                    announce_channel,
+                    f"🎊 <b>{giveaway.title}</b>\n\n"
+                    f"👤 {get_text('gw_participants', lang='uz')}: {len(giveaway.participants)}\n\n"
+                    f"<b>🏆 G'oliblar:</b>\n{winners_text}\n\n"
+                    f"Tabriklaymiz! 🎉",
                     parse_mode="HTML",
                 )
             except Exception as e:
-                logger.error(f"Failed to announce giveaway {giveaway.id}: {e}")
+                logger.error(f"Failed to announce giveaway {giveaway.id} in channel: {e}")
 
-            # DM winners
+            # Also notify the creator via DM
+            try:
+                lang = await get_user_lang(giveaway.creator_id)
+                creator_msg = {
+                    "uz": f"✅ <b>{giveaway.title}</b> tugadi!\n\nG'oliblar:\n{winners_text}",
+                    "ru": f"✅ <b>{giveaway.title}</b> завершён!\n\nПобедители:\n{winners_text}",
+                    "en": f"✅ <b>{giveaway.title}</b> ended!\n\nWinners:\n{winners_text}",
+                }
+                await context.bot.send_message(
+                    giveaway.creator_id,
+                    creator_msg.get(lang, creator_msg["uz"]),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+            # DM each winner
             for winner in winners:
                 try:
+                    w_lang = await get_user_lang(winner.user_id)
+                    win_msg = {
+                        "uz": f"🎉 <b>Tabriklaymiz!</b>\n\n<b>{giveaway.title}</b> yutuqli o'yinida g'olib bo'ldingiz!\n🎁 {giveaway.prize or ''}\n\nTashkilotchi bilan bog'laning!",
+                        "ru": f"🎉 <b>Поздравляем!</b>\n\nВы победили в розыгрыше <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}\n\nСвяжитесь с организатором!",
+                        "en": f"🎉 <b>Congratulations!</b>\n\nYou won: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}\n\nContact the organizer to claim!",
+                    }
                     await context.bot.send_message(
-                        winner.user_id,
-                        f"🎉 <b>Congratulations!</b>\n\n"
-                        f"You won the giveaway: <b>{giveaway.title}</b>\n"
-                        f"🎁 Prize: {giveaway.prize}\n\n"
-                        f"Contact the organizer to claim your prize!",
-                        parse_mode="HTML",
+                        winner.user_id, win_msg.get(w_lang, win_msg["uz"]), parse_mode="HTML",
                     )
                 except Exception:
                     pass  # User may have blocked the bot
