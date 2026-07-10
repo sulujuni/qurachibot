@@ -559,6 +559,24 @@ async def miniapp_create_giveaway(
     channels_str = serialize_channels(_pc(required_channels)) if required_channels else None
 
     async with async_session() as session:
+        # Parse scheduled_start
+        scheduled_start = None
+        start_str = body.get("scheduled_start")
+        if start_str:
+            try:
+                scheduled_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        # Parse channel_id
+        channel_id_val = body.get("channel_id")
+        parsed_channel = None
+        if channel_id_val:
+            ch = str(channel_id_val).strip()
+            parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
+
+        gw_status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
+
         giveaway = Giveaway(
             title=title, post_text=post_text,
             post_file_id=body.get("post_file_id") or None,
@@ -566,7 +584,9 @@ async def miniapp_create_giveaway(
             winner_count=winner_count,
             required_channels=channels_str,
             is_test=bool(body.get("is_test", False)),
-            status=GiveawayStatus.ACTIVE,
+            status=gw_status,
+            scheduled_start=scheduled_start,
+            channel_id=parsed_channel,
             creator_id=user_id, creator_username=username,
             chat_id=user_id,
             ends_at=ends_at,
@@ -826,12 +846,34 @@ async def miniapp_create_contest(
     # If add_join_button is True, also create a Giveaway linked to this contest
     giveaway_id = None
     if add_join_button:
+        # Parse scheduled_start
+        scheduled_start = None
+        start_str = body.get("scheduled_start")
+        if start_str:
+            try:
+                scheduled_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        # Parse channel_id
+        channel_id_val = body.get("channel_id")
+        parsed_channel = None
+        if channel_id_val:
+            ch = str(channel_id_val).strip()
+            parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
+
+        gw_status = GiveawayStatus.QUEUED if scheduled_start else GiveawayStatus.ACTIVE
+
         async with async_session() as session:
             giveaway = Giveaway(
                 title=title, post_text=post_text,
+                post_file_id=body.get("post_file_id") or None,
+                post_media_type="photo" if body.get("post_file_id") else None,
                 winner_count=max(1, int(body.get("winner_count", 1))),
                 required_channels=channels_str,
-                status=GiveawayStatus.ACTIVE,
+                status=gw_status,
+                scheduled_start=scheduled_start,
+                channel_id=parsed_channel,
                 creator_id=user_id, creator_username=username,
                 chat_id=user_id, ends_at=ends_at,
             )
