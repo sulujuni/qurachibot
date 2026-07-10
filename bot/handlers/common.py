@@ -249,51 +249,142 @@ async def open_miniapp_tab(update: Update, context: ContextTypes.DEFAULT_TYPE, t
 
 async def mygames_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Open My Games tab. Command: /mygiveaways"""
-    await open_miniapp_tab(update, context, "games")
+    await menu_my_giveaways(update, context)
 
 
 async def leaderboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Open Leaderboard tab. Command: /leaderboard"""
-    await open_miniapp_tab(update, context, "leaders")
+    await menu_leaderboard(update, context)
 
 
 # ─── Reply Keyboard Menu Handlers ────────────────────────────────────────────
 
 
-async def menu_create_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '🎲 Create Giveaway' button tap."""
+def _miniapp_extra_button(tab: str, lang: str) -> list:
+    """Return an optional Mini App inline button row (if WEB_URL is set)."""
     web_url = settings.WEB_URL
-    if web_url:
-        await open_miniapp_tab(update, context, "create")
-    else:
-        # Fallback: trigger /newgiveaway command
-        from bot.handlers.giveaway import new_giveaway_start
-        await new_giveaway_start(update, context)
+    if not web_url:
+        return []
+    from telegram import WebAppInfo
+    url = f"{web_url.rstrip('/')}/miniapp?tab={tab}"
+    label = {"uz": "📱 Mini App'da ko'rish", "ru": "📱 Открыть в Mini App", "en": "📱 Open in Mini App"}
+    return [[InlineKeyboardButton(label.get(lang, label["uz"]), web_app=WebAppInfo(url=url))]]
+
+
+async def menu_create_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🎲 Create Game' button tap — start creation flow directly."""
+    from bot.handlers.giveaway import new_giveaway_start
+    await new_giveaway_start(update, context)
 
 
 async def menu_my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '📋 My Giveaways' button tap."""
-    web_url = settings.WEB_URL
-    if web_url:
-        await open_miniapp_tab(update, context, "games")
+    """Handle '📋 My Games' button tap — show text list of user's games."""
+    from bot.models.database import async_session as _session
+    from bot.models.giveaway import Giveaway, GiveawayStatus, GiveawayParticipant
+    from sqlalchemy import select, func
+    from sqlalchemy.orm import selectinload
+
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    async with _session() as session:
+        # User's created games
+        result = await session.execute(
+            select(Giveaway).options(selectinload(Giveaway.participants))
+            .where(Giveaway.creator_id == user_id)
+            .order_by(Giveaway.created_at.desc()).limit(5)
+        )
+        created = result.scalars().all()
+
+        # User's participated games
+        result = await session.execute(
+            select(GiveawayParticipant)
+            .where(GiveawayParticipant.user_id == user_id)
+            .order_by(GiveawayParticipant.joined_at.desc()).limit(5)
+        )
+        participations = result.scalars().all()
+
+    status_emoji = {GiveawayStatus.ACTIVE: "🟢", GiveawayStatus.COMPLETED: "✅", GiveawayStatus.CANCELLED: "❌"}
+
+    texts = {
+        "uz": "📋 <b>Mening o'yinlarim</b>\n\n",
+        "ru": "📋 <b>Мои игры</b>\n\n",
+        "en": "📋 <b>My Games</b>\n\n",
+    }
+    text = texts.get(lang, texts["uz"])
+
+    if created:
+        text += {"uz": "📢 <b>Yaratganlarim:</b>\n", "ru": "📢 <b>Созданные:</b>\n", "en": "📢 <b>Created:</b>\n"}.get(lang, "")
+        for gw in created:
+            e = status_emoji.get(gw.status, "❓")
+            text += f"{e} {gw.title} — 👤 {len(gw.participants)}\n"
+        text += "\n"
     else:
-        from bot.handlers.giveaway import my_giveaways
-        await my_giveaways(update, context)
+        text += {"uz": "📢 Hali o'yin yaratmagansiz\n\n", "ru": "📢 Вы ещё не создавали игр\n\n", "en": "📢 No games created yet\n\n"}.get(lang, "")
+
+    if participations:
+        text += {"uz": "🎮 <b>Qatnashganlarim:</b>\n", "ru": "🎮 <b>Участия:</b>\n", "en": "🎮 <b>Joined:</b>\n"}.get(lang, "")
+        for p in participations[:5]:
+            async with _session() as session:
+                gw = (await session.execute(select(Giveaway).where(Giveaway.id == p.giveaway_id))).scalar_one_or_none()
+            if gw:
+                e = status_emoji.get(gw.status, "❓")
+                text += f"{e} {gw.title}\n"
+    else:
+        text += {"uz": "🎮 Hali biror o'yinda qatnashmagansiz", "ru": "🎮 Вы ещё не участвовали", "en": "🎮 No games joined yet"}.get(lang, "")
+
+    extra = _miniapp_extra_button("games", lang)
+    keyboard = InlineKeyboardMarkup(extra) if extra else None
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def menu_create_contest(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '🏅 Create Contest' button tap."""
-    web_url = settings.WEB_URL
-    if web_url:
-        await open_miniapp_tab(update, context, "create")
-    else:
-        from bot.handlers.contest import new_contest_start
-        await new_contest_start(update, context)
+    """Handle '🏅 Create Contest' button tap — start contest creation."""
+    from bot.handlers.contest import new_contest_start
+    await new_contest_start(update, context)
 
 
 async def menu_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '🏆 Leaderboard' button tap."""
-    await open_miniapp_tab(update, context, "leaders")
+    """Handle '🏆 Leaderboard' button tap — show top users text."""
+    from bot.models.database import async_session as _session
+    from bot.models.loyalty import LoyaltyPoints
+    from sqlalchemy import select
+
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    async with _session() as session:
+        result = await session.execute(
+            select(LoyaltyPoints).order_by(LoyaltyPoints.total_earned.desc()).limit(10)
+        )
+        top = result.scalars().all()
+
+    headers = {"uz": "🏆 <b>Eng faol foydalanuvchilar</b>\n\n", "ru": "🏆 <b>Самые активные</b>\n\n", "en": "🏆 <b>Top Users</b>\n\n"}
+    text = headers.get(lang, headers["uz"])
+
+    if not top:
+        text += {"uz": "Hali reyting ma'lumotlari yo'q", "ru": "Рейтинг пока пуст", "en": "No leaderboard data yet"}.get(lang, "")
+    else:
+        medals = ["🥇", "🥈", "🥉"]
+        for i, u in enumerate(top):
+            rank = medals[i] if i < 3 else f"{i+1}."
+            name = f"@{u.username}" if u.username else (u.first_name or "?")
+            wins_text = f" | 🏆{u.wins}" if u.wins else ""
+            text += f"{rank} {name} — <b>{u.total_earned or 0}</b> ball{wins_text}\n"
+
+        # Show user's own rank
+        user_rank = None
+        for i, u in enumerate(top):
+            if u.user_id == user_id:
+                user_rank = i + 1
+                break
+        if user_rank:
+            rank_label = "Sizning o'rningiz" if lang == "uz" else "Ваша позиция" if lang == "ru" else "Your rank"
+            text += f"\n📍 {rank_label}: #{user_rank}"
+
+    extra = _miniapp_extra_button("leaders", lang)
+    keyboard = InlineKeyboardMarkup(extra) if extra else None
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def menu_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -303,12 +394,8 @@ async def menu_referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def menu_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle '⚙️ Settings' button tap."""
-    web_url = settings.WEB_URL
-    if web_url:
-        await open_miniapp_tab(update, context, "profile")
-    else:
-        await lang_command(update, context)
+    """Handle '⚙️ Settings' button tap — show language selector."""
+    await lang_command(update, context)
 
 
 async def menu_report_bug(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
