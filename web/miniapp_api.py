@@ -183,7 +183,7 @@ async def get_giveaway_info(
         "post_text": giveaway.post_text,
         "prize": giveaway.prize,
         "winner_count": giveaway.winner_count,
-        "status": giveaway.status.value,
+        "status": giveaway.status,
         "participants": participant_count,
         "already_joined": already_joined,
         "must_subscribe": must_subscribe,
@@ -466,7 +466,7 @@ async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
             )).scalar_one_or_none() is not None
             participated.append({
                 "id": gw.id, "title": gw.title, "prize": gw.prize,
-                "status": gw.status.value, "won": won,
+                "status": gw.status, "won": won,
                 "created_at": gw.created_at.isoformat() if gw.created_at else None,
             })
 
@@ -487,7 +487,7 @@ async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
             )).scalar() or 0
             created.append({
                 "id": gw.id, "title": gw.title, "prize": gw.prize,
-                "status": gw.status.value, "participants": count,
+                "status": gw.status, "participants": count,
                 "created_at": gw.created_at.isoformat() if gw.created_at else None,
             })
 
@@ -954,7 +954,7 @@ async def admin_all_giveaways(x_telegram_init_data: str | None = Header(None)):
             )).scalar() or 0
             items.append({
                 "id": gw.id, "title": gw.title, "prize": gw.prize,
-                "status": gw.status.value, "participants": count,
+                "status": gw.status, "participants": count,
                 "winner_count": gw.winner_count,
                 "creator_username": gw.creator_username,
                 "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
