@@ -10,9 +10,11 @@ from bot.models.base import Base
 
 
 class GiveawayStatus(enum.Enum):
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
+    DRAFT = "draft"          # Being edited, not yet queued
+    QUEUED = "queued"        # Waiting for scheduled_start time to publish
+    ACTIVE = "active"        # Published, accepting participants
+    COMPLETED = "completed"  # Winners drawn
+    CANCELLED = "cancelled"  # Cancelled by creator
 
 
 class Giveaway(Base):
@@ -26,7 +28,7 @@ class Giveaway(Base):
     prize: Mapped[str] = mapped_column(String(500), nullable=True)
     winner_count: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[GiveawayStatus] = mapped_column(
-        Enum(GiveawayStatus), default=GiveawayStatus.ACTIVE
+        Enum(GiveawayStatus), default=GiveawayStatus.DRAFT
     )
     # Comma-separated list of channels users must join to participate (forced-sub)
     required_channels: Mapped[str] = mapped_column(Text, nullable=True)
@@ -43,10 +45,15 @@ class Giveaway(Base):
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     creator_username: Mapped[str] = mapped_column(String(255), nullable=True)
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Channel where the giveaway post was published (may differ from chat_id)
+    channel_id: Mapped[int] = mapped_column(BigInteger, nullable=True)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=True)  # Published message ID in channel
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    scheduled_start: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # When to auto-publish
+    ends_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # When to auto-draw (end time)
+    published_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # When actually published
     drawn_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
     # Relationships

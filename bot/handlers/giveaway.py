@@ -330,6 +330,7 @@ async def _finalize_giveaway(query, context) -> int:
             post_media_type=post_data["post_media_type"],
             winner_count=context.user_data["winner_count"],
             required_channels=context.user_data.get("channels"),
+            status=GiveawayStatus.ACTIVE,
             creator_id=query.from_user.id,
             creator_username=query.from_user.username,
             chat_id=query.message.chat_id,
@@ -379,6 +380,7 @@ async def _finalize_giveaway_from_message(update: Update, context) -> int:
             post_media_type=post_data["post_media_type"],
             winner_count=context.user_data["winner_count"],
             required_channels=context.user_data.get("channels"),
+            status=GiveawayStatus.ACTIVE,
             creator_id=update.effective_user.id,
             creator_username=update.effective_user.username,
             chat_id=update.effective_chat.id,
@@ -620,6 +622,8 @@ async def my_giveaways(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     status_emoji = {
+        GiveawayStatus.DRAFT: "📝",
+        GiveawayStatus.QUEUED: "⏳",
         GiveawayStatus.ACTIVE: "🟢",
         GiveawayStatus.COMPLETED: "✅",
         GiveawayStatus.CANCELLED: "❌",

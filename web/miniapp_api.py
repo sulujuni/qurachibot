@@ -566,6 +566,7 @@ async def miniapp_create_giveaway(
             winner_count=winner_count,
             required_channels=channels_str,
             is_test=bool(body.get("is_test", False)),
+            status=GiveawayStatus.ACTIVE,
             creator_id=user_id, creator_username=username,
             chat_id=user_id,
             ends_at=ends_at,
@@ -830,6 +831,7 @@ async def miniapp_create_contest(
                 title=title, post_text=post_text,
                 winner_count=max(1, int(body.get("winner_count", 1))),
                 required_channels=channels_str,
+                status=GiveawayStatus.ACTIVE,
                 creator_id=user_id, creator_username=username,
                 chat_id=user_id, ends_at=ends_at,
             )
