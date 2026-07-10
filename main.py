@@ -237,10 +237,6 @@ async def post_init(application: Application) -> None:
             BotCommand("lang", "Tilni o'zgartirish"),
         ],
     }
-            BotCommand("settings", "Sozlamalar"),
-            BotCommand("lang", "Tilni o'zgartirish"),
-        ],
-    }
     for lang_code, cmds in command_sets.items():
         if lang_code:
             await application.bot.set_my_commands(cmds, language_code=lang_code)
