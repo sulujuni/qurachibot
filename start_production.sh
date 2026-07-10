@@ -34,6 +34,8 @@ GIT_BRANCH="feature/forced-sub-referral-antiabuse"
 # ─── Stop mode ─────────────────────────────────────────────
 if [ "$1" = "stop" ]; then
     echo "🛑 Stopping Qurachi..."
+    # Stop cloudflared
+    pkill -f "cloudflared tunnel" 2>/dev/null && echo "  Stopped cloudflared"
     # Stop updater + trigger watcher
     if [ -f "$UPDATER_PID_FILE" ]; then
         while read -r pid; do
@@ -41,7 +43,7 @@ if [ "$1" = "stop" ]; then
         done < "$UPDATER_PID_FILE"
         rm -f "$UPDATER_PID_FILE"
     fi
-    # Stop bot + web
+    # Stop bot + web + cloudflared
     if [ -f "$PID_FILE" ]; then
         while read -r pid; do
             kill "$pid" 2>/dev/null && echo "  Stopped PID $pid"
@@ -69,8 +71,8 @@ fi
 
 # ─── Helper: start bot + web ──────────────────────────────
 start_services() {
-    echo "🌍 Starting web server (port 8080)..."
-    python3 web_server.py &
+    echo "🌍 Starting web server (port 8090)..."
+    WEB_PORT=8090 python3 web_server.py &
     WEB_PID=$!
     echo "$WEB_PID" > "$PID_FILE"
     sleep 1
@@ -198,6 +200,13 @@ trigger_watcher() {
     done
 }
 
+# ─── Start Cloudflare tunnel (port 8090) ──────────────────
+echo "☁️  Starting Cloudflare tunnel (localhost:8090)..."
+cloudflared tunnel --url http://localhost:8090 > cloudflared.log 2>&1 &
+CLOUDFLARED_PID=$!
+echo "$CLOUDFLARED_PID" >> "$PID_FILE"
+sleep 3
+
 # ─── Start services ───────────────────────────────────────
 start_services
 
@@ -240,6 +249,7 @@ cleanup() {
     echo "🛑 Stopping..."
     kill "$UPDATER_PID" 2>/dev/null
     kill "$TRIGGER_PID" 2>/dev/null
+    kill "$CLOUDFLARED_PID" 2>/dev/null
     rm -f "$UPDATER_PID_FILE"
     stop_services
     echo "✅ Stopped."

@@ -19,7 +19,7 @@ class Settings:
         int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()
     ])
     WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
-    WEB_PORT: int = int(os.getenv("WEB_PORT", "8080"))
+    WEB_PORT: int = int(os.getenv("WEB_PORT", "8090"))
     # Public HTTPS URL of the web dashboard. Set this to enable the "Dashboard"
     # button in the Telegram chat menu. Must be HTTPS for Telegram Web Apps.
     # Example: https://bot.yourdomain.com or your Cloudflare tunnel URL.
