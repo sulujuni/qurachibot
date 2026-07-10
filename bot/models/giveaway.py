@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from bot.models.base import Base
@@ -35,6 +35,9 @@ class Giveaway(Base):
     post_text: Mapped[str] = mapped_column(Text, nullable=True)
     post_file_id: Mapped[str] = mapped_column(String(500), nullable=True)
     post_media_type: Mapped[str] = mapped_column(String(20), nullable=True)  # photo, video, animation, document
+
+    # Test mode: if True, does not notify subscribers
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)

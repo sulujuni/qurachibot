@@ -565,6 +565,7 @@ async def miniapp_create_giveaway(
             post_media_type="photo" if body.get("post_file_id") else None,
             winner_count=winner_count,
             required_channels=channels_str,
+            is_test=bool(body.get("is_test", False)),
             creator_id=user_id, creator_username=username,
             chat_id=user_id,
             ends_at=ends_at,
@@ -598,8 +599,8 @@ async def miniapp_upload_photo(
 
     # Read file bytes
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:  # 10MB limit
-        return {"error": "File too large (max 10MB)"}
+    if len(contents) > 3 * 1024 * 1024:  # 3MB limit
+        return {"error": "Fayl hajmi katta (maks 3MB)"}
 
     # Send photo to the user via bot to get file_id, then delete
     from telegram import Bot, InputFile

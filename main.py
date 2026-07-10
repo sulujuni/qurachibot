@@ -90,6 +90,7 @@ async def post_init(application: Application) -> None:
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
                 "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS is_test BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE giveaways ALTER COLUMN prize DROP NOT NULL",
                 "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_text TEXT",
                 "ALTER TABLE group_giveaways ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",

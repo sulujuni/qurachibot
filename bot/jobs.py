@@ -307,6 +307,7 @@ async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
             select(Giveaway).where(
                 Giveaway.created_at >= since,
                 Giveaway.status == GiveawayStatus.ACTIVE,
+                Giveaway.is_test == False,
             )
         )
         new_giveaways = result.scalars().all()

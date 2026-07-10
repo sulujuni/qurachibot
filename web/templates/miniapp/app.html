@@ -1604,6 +1604,10 @@ function renderCreateForm() {
             <div class="form-hint">${t('f_deadline_hint')}</div></div>
         <div class="form-group"><label class="form-label">${t('f_channels')}</label>
             <input class="form-input" id="cChannels" placeholder="@channel1, @channel2"></div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="cIsTest" style="width:20px;height:20px;flex-shrink:0;">
+            <label for="cIsTest" style="font-size:13px;font-weight:600;cursor:pointer;">${currentLang==='uz'?"🧪 Test rejim (foydalanuvchilarga xabar bermaydi)":currentLang==='ru'?'🧪 Тест (не уведомлять пользователей)':'🧪 Test mode (no notifications)'}</label>
+        </div>
         <button class="btn btn-primary" onclick="submitCommentGiveaway()">${ic('message',18)} ${t('create_btn')}</button>
         <p style="font-size:11.5px;color:var(--text-dim);margin-top:12px;">${t('comment_note')}</p>`;
 
@@ -1631,6 +1635,10 @@ function renderCreateForm() {
         <div class="form-group" style="display:flex;align-items:center;gap:10px;">
             <input type="checkbox" id="cAddJoinBtn" style="width:20px;height:20px;flex-shrink:0;">
             <label for="cAddJoinBtn" style="font-size:13px;font-weight:600;cursor:pointer;">${addBtnLabel}</label>
+        </div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="cIsTest" style="width:20px;height:20px;flex-shrink:0;">
+            <label for="cIsTest" style="font-size:13px;font-weight:600;cursor:pointer;">${currentLang==='uz'?"🧪 Test rejim (foydalanuvchilarga xabar bermaydi)":currentLang==='ru'?'🧪 Тест (не уведомлять пользователей)':'🧪 Test mode (no notifications)'}</label>
         </div>
         <div class="form-group"><label class="form-label">${t('f_duration')}</label>
             <select class="form-select" id="cDuration">${durationOptions()}</select></div>
@@ -1760,6 +1768,7 @@ async function submitCommentGiveaway() {
         duration: duration,
         deadline: deadline,
         mode: mode,
+        is_test: document.getElementById('cIsTest')?.checked || false,
         keyword: mode === 'keyword' ? (document.getElementById('cKeyword').value.trim() || null) : null,
         required_channels: document.getElementById('cChannels').value.trim() || null,
     };
@@ -1790,6 +1799,7 @@ async function submitContest() {
         contest_type: document.getElementById('cContestType').value,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         add_join_button: addJoinBtn,
+        is_test: document.getElementById('cIsTest')?.checked || false,
         duration: duration,
         deadline: deadline,
         required_channels: document.getElementById('cChannels')?.value.trim() || null,
