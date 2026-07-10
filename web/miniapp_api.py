@@ -693,10 +693,70 @@ async def miniapp_share_to_channel(
                 channel_id, giveaway.post_text or giveaway.title,
                 parse_mode="HTML", reply_markup=kb,
             )
+        # Success — save channel to user's list for future quick-select
+        try:
+            chat_info = await bot.get_chat(channel_id)
+            from bot.models.user_channel import UserChannel
+            async with async_session() as session:
+                # Check if already saved
+                from sqlalchemy import select, and_
+                existing = await session.execute(
+                    select(UserChannel).where(
+                        and_(UserChannel.user_id == user_id, UserChannel.chat_id == chat_info.id)
+                    )
+                )
+                if not existing.scalar_one_or_none():
+                    session.add(UserChannel(
+                        user_id=user_id,
+                        chat_id=chat_info.id,
+                        chat_title=chat_info.title,
+                        chat_username=chat_info.username,
+                    ))
+                    await session.commit()
+        except Exception:
+            pass  # Non-critical — channel still sent successfully
+
         return {"success": True}
     except Exception as e:
         logger.error("Share to channel failed: %s", e)
         return {"error": f"Yuborib bo'lmadi: {str(e)[:100]}"}
+
+
+@router.get("/my-channels")
+async def miniapp_my_channels(x_telegram_init_data: str | None = Header(None)):
+    """Get channels where the user has previously shared posts (bot is admin)."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    from bot.models.user_channel import UserChannel
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(UserChannel).where(UserChannel.user_id == user_id)
+            .order_by(UserChannel.added_at.desc()).limit(20)
+        )
+        channels = result.scalars().all()
+
+    # Also include channels from join filters (in case they set up filters but haven't shared yet)
+    from bot.handlers.join_request import JoinFilter
+    async with async_session() as session:
+        result = await session.execute(select(JoinFilter).limit(20))
+        filters = result.scalars().all()
+
+    # Merge both lists (deduplicate by chat_id)
+    seen = set()
+    items = []
+    for ch in channels:
+        if ch.chat_id not in seen:
+            seen.add(ch.chat_id)
+            items.append({"chat_id": ch.chat_id, "title": ch.chat_title or f"Channel {ch.chat_id}", "username": ch.chat_username})
+    for f in filters:
+        if f.chat_id not in seen:
+            seen.add(f.chat_id)
+            items.append({"chat_id": f.chat_id, "title": f.chat_title or f"Channel {f.chat_id}", "username": None})
+
+    return items
 
 
 @router.post("/create-contest")

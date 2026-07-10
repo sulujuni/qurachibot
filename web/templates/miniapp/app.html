@@ -1865,13 +1865,13 @@ async function loadKnownChannels() {
     const container = document.getElementById('knownChannels');
     if (!container) return;
     try {
-        const filters = await api('/join-filters');
-        if (filters && filters.length) {
-            const label = currentLang === 'uz' ? "Tanlang:" : currentLang === 'ru' ? 'Выберите:' : 'Select:';
-            let html = `<span style="font-size:11px;color:var(--text-hint);width:100%;">${label}</span>`;
-            filters.forEach(f => {
-                const name = f.chat_title || f.chat_id;
-                html += `<button class="chip" style="font-size:12px;padding:6px 12px;min-height:32px;" onclick="document.getElementById('shareChannelInput').value='${f.chat_id}'">${ic('megaphone',13)} ${name}</button>`;
+        const channels = await api('/my-channels');
+        if (channels && channels.length) {
+            const label = currentLang === 'uz' ? "Kanallaringiz:" : currentLang === 'ru' ? 'Ваши каналы:' : 'Your channels:';
+            let html = `<span style="font-size:11px;color:var(--text-hint);width:100%;margin-bottom:4px;">${label}</span>`;
+            channels.forEach(ch => {
+                const name = ch.title || ch.username || ch.chat_id;
+                html += `<button class="chip" style="font-size:12px;padding:6px 12px;min-height:32px;" onclick="document.getElementById('shareChannelInput').value='${ch.chat_id}'">${ic('megaphone',13)} ${name}</button>`;
             });
             container.innerHTML = html;
         }

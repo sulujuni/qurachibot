@@ -9,6 +9,7 @@ from bot.models.group_giveaway import (
     GroupGiveawayStatus, GroupGiveawayWinner,
 )
 from bot.models.loyalty import LoyaltyPoints, PointsTransaction
+from bot.models.user_channel import UserChannel
 from bot.models.moderation import Blacklist, ContentFlag, RateLimitLog
 from bot.models.notification import AlertSubscription, ScheduledReminder
 from bot.models.referral import Referral

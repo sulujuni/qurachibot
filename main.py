@@ -99,6 +99,15 @@ async def post_init(application: Application) -> None:
                 "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_text TEXT",
                 "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_file_id VARCHAR(500)",
                 "ALTER TABLE contests ADD COLUMN IF NOT EXISTS post_media_type VARCHAR(20)",
+                """CREATE TABLE IF NOT EXISTS user_channels (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    chat_title VARCHAR(255),
+                    chat_username VARCHAR(255),
+                    added_at TIMESTAMP DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_user_channels_user_id ON user_channels(user_id)",
             ]
             for stmt in migrations:
                 try:
