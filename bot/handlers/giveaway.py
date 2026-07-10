@@ -39,7 +39,7 @@ from bot.utils.subscription import (
 )
 
 # Conversation states (post-based flow)
-POST, WINNERS, DURATION, CHANNELS = range(4)
+POST, PREVIEW, WINNERS, DURATION, CHANNELS = range(5)
 
 
 def _join_button(giveaway_id: int, participant_count: int, lang: str) -> InlineKeyboardMarkup:
@@ -145,7 +145,7 @@ async def new_giveaway_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def giveaway_receive_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Receive the admin's giveaway post (text/photo/video/etc)."""
+    """Receive the admin's giveaway post (text/photo/video/etc) and show preview."""
     lang = context.user_data.get("lang", "en")
     message = update.message
 
@@ -155,13 +155,63 @@ async def giveaway_receive_post(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Auto-generate a title from first line of text (for internal reference)
     text_content = post_data["post_text"] or ""
-    # Strip HTML tags for title extraction
     import re
     plain_text = re.sub(r"<[^>]+>", "", text_content)
     first_line = plain_text.strip().split("\n")[0][:100] if plain_text.strip() else "Giveaway"
     context.user_data["title"] = first_line
 
-    # Ask winner count
+    # Show preview — re-send the post as it will appear
+    preview_labels = {
+        "uz": "👁 <b>Ko'rib chiqish:</b>\nPost shunday ko'rinadi. Tasdiqlaysizmi?",
+        "ru": "👁 <b>Предпросмотр:</b>\nВот как будет выглядеть пост. Подтвердить?",
+        "en": "👁 <b>Preview:</b>\nThis is how the post will look. Confirm?",
+    }
+    await message.reply_text(preview_labels.get(lang, preview_labels["uz"]), parse_mode="HTML")
+
+    # Re-send the content as preview
+    if post_data["post_file_id"] and post_data["post_media_type"]:
+        mt = post_data["post_media_type"]
+        caption = post_data["post_text"] or ""
+        if mt == "photo":
+            await context.bot.send_photo(message.chat_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+        elif mt == "video":
+            await context.bot.send_video(message.chat_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+        elif mt == "animation":
+            await context.bot.send_animation(message.chat_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+        else:
+            await context.bot.send_document(message.chat_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+    else:
+        await message.reply_text(post_data["post_text"] or "—", parse_mode="HTML")
+
+    # Confirm/redo buttons
+    confirm_labels = {
+        "uz": ("✅ Tasdiqlash", "🔄 Qaytadan yuborish"),
+        "ru": ("✅ Подтвердить", "🔄 Отправить заново"),
+        "en": ("✅ Confirm", "🔄 Send again"),
+    }
+    cl, rl = confirm_labels.get(lang, confirm_labels["uz"])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(cl, callback_data="gwprev_confirm")],
+        [InlineKeyboardButton(rl, callback_data="gwprev_redo")],
+    ])
+    await message.reply_text(
+        "👆", reply_markup=keyboard,
+    )
+    return PREVIEW
+
+
+async def giveaway_preview_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle preview confirm/redo."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("lang", "en")
+
+    if query.data == "gwprev_redo":
+        # Ask to send again
+        await query.edit_message_text(get_text("gw_send_post", lang=lang), parse_mode="HTML")
+        return POST
+
+    # Confirmed — ask winner count
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("1", callback_data="gwwin_1"),
@@ -173,7 +223,7 @@ async def giveaway_receive_post(update: Update, context: ContextTypes.DEFAULT_TY
             InlineKeyboardButton("10", callback_data="gwwin_10"),
         ],
     ])
-    await message.reply_text(
+    await query.edit_message_text(
         get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML"
     )
     return WINNERS
@@ -641,6 +691,135 @@ def _format_user(participant) -> str:
     return f"User {participant.user_id}"
 
 
+# ─── Notify Participants ─────────────────────────────────────────────────────
+
+
+NOTIFY_MSG = 100  # state for notify conversation
+
+
+async def notify_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start notifying participants. Command: /notify <giveaway_id>"""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    if not context.args:
+        # Show list of active giveaways to pick from
+        async with async_session() as session:
+            result = await session.execute(
+                select(Giveaway).where(
+                    Giveaway.creator_id == user_id,
+                    Giveaway.status == GiveawayStatus.ACTIVE,
+                )
+            )
+            giveaways = result.scalars().all()
+
+        if not giveaways:
+            msg = {"uz": "Sizda faol o'yinlar yo'q.", "ru": "У вас нет активных игр.", "en": "You have no active games."}
+            await update.message.reply_text(msg.get(lang, msg["uz"]))
+            return ConversationHandler.END
+
+        gw_list = "\n".join(f"• <code>/notify {gw.id}</code> — {gw.title}" for gw in giveaways)
+        msg = {"uz": f"📢 Qaysi o'yinga xabar yubormoqchisiz?\n\n{gw_list}",
+               "ru": f"📢 Для какой игры отправить уведомление?\n\n{gw_list}",
+               "en": f"📢 Which game to notify?\n\n{gw_list}"}
+        await update.message.reply_text(msg.get(lang, msg["uz"]), parse_mode="HTML")
+        return ConversationHandler.END
+
+    try:
+        giveaway_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid ID")
+        return ConversationHandler.END
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(Giveaway.id == giveaway_id)
+        )
+        giveaway = result.scalar_one_or_none()
+
+    if not giveaway:
+        await update.message.reply_text("❌ Not found")
+        return ConversationHandler.END
+    if giveaway.creator_id != user_id:
+        msg = {"uz": "❌ Faqat yaratuvchi xabar yubora oladi.", "ru": "❌ Только создатель может уведомлять.", "en": "❌ Only the creator can notify."}
+        await update.message.reply_text(msg.get(lang, msg["uz"]))
+        return ConversationHandler.END
+
+    context.user_data["notify_giveaway_id"] = giveaway_id
+    context.user_data["notify_lang"] = lang
+
+    msg = {"uz": f"📢 <b>{giveaway.title}</b> ishtirokchilariga xabar yuboring.\n\nXabar matnini hozir yozing (matn, rasm, video — istalgan format):",
+           "ru": f"📢 Отправьте сообщение участникам <b>{giveaway.title}</b>.\n\nНапишите текст уведомления (текст, фото, видео — любой формат):",
+           "en": f"📢 Send a message to <b>{giveaway.title}</b> participants.\n\nType the notification now (text, photo, video — any format):"}
+    await update.message.reply_text(msg.get(lang, msg["uz"]), parse_mode="HTML")
+    return NOTIFY_MSG
+
+
+async def notify_receive_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Receive the notification message and send to all participants."""
+    lang = context.user_data.get("notify_lang", "en")
+    giveaway_id = context.user_data.get("notify_giveaway_id")
+
+    if not giveaway_id:
+        return ConversationHandler.END
+
+    message = update.message
+    post_data = _extract_post_data(message)
+
+    # Get all participants
+    async with async_session() as session:
+        result = await session.execute(
+            select(GiveawayParticipant).where(
+                GiveawayParticipant.giveaway_id == giveaway_id
+            )
+        )
+        participants = result.scalars().all()
+
+    if not participants:
+        msg = {"uz": "❌ Bu o'yinda ishtirokchilar yo'q.", "ru": "❌ В этой игре нет участников.", "en": "❌ No participants in this game."}
+        await message.reply_text(msg.get(lang, msg["uz"]))
+        context.user_data.pop("notify_giveaway_id", None)
+        context.user_data.pop("notify_lang", None)
+        return ConversationHandler.END
+
+    # Send to each participant
+    sent = 0
+    failed = 0
+    for p in participants:
+        try:
+            if post_data["post_file_id"] and post_data["post_media_type"]:
+                mt = post_data["post_media_type"]
+                caption = post_data["post_text"] or ""
+                if mt == "photo":
+                    await context.bot.send_photo(p.user_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+                elif mt == "video":
+                    await context.bot.send_video(p.user_id, post_data["post_file_id"], caption=caption, parse_mode="HTML")
+                else:
+                    await context.bot.send_message(p.user_id, caption or "📢", parse_mode="HTML")
+            else:
+                await context.bot.send_message(p.user_id, post_data["post_text"] or "📢", parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    msg = {"uz": f"✅ Xabar yuborildi!\n\n📨 Yuborildi: {sent}\n❌ Muvaffaqiyatsiz: {failed}",
+           "ru": f"✅ Уведомление отправлено!\n\n📨 Отправлено: {sent}\n❌ Не удалось: {failed}",
+           "en": f"✅ Notification sent!\n\n📨 Sent: {sent}\n❌ Failed: {failed}"}
+    await message.reply_text(msg.get(lang, msg["uz"]), parse_mode="HTML")
+
+    context.user_data.pop("notify_giveaway_id", None)
+    context.user_data.pop("notify_lang", None)
+    return ConversationHandler.END
+
+
+async def notify_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancel notify."""
+    context.user_data.pop("notify_giveaway_id", None)
+    context.user_data.pop("notify_lang", None)
+    await update.message.reply_text("❌ Bekor qilindi.")
+    return ConversationHandler.END
+
+
 # ─── Handler Registration ────────────────────────────────────────────────────────
 
 
@@ -656,6 +835,7 @@ def get_giveaway_handlers() -> list:
                     giveaway_receive_post,
                 ),
             ],
+            PREVIEW: [CallbackQueryHandler(giveaway_preview_response, pattern=r"^gwprev_")],
             WINNERS: [CallbackQueryHandler(giveaway_winners_selected, pattern=r"^gwwin_")],
             DURATION: [CallbackQueryHandler(giveaway_duration_selected, pattern=r"^gwdur_")],
             CHANNELS: [
@@ -666,8 +846,23 @@ def get_giveaway_handlers() -> list:
         fallbacks=[CommandHandler("cancel", cancel_creation)],
     )
 
+    notify_conv = ConversationHandler(
+        entry_points=[CommandHandler("notify", notify_start)],
+        states={
+            NOTIFY_MSG: [
+                MessageHandler(
+                    (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL)
+                    & ~filters.COMMAND,
+                    notify_receive_message,
+                ),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", notify_cancel)],
+    )
+
     return [
         create_conv,
+        notify_conv,
         CommandHandler("draw", draw_giveaway),
         CommandHandler("mygiveaways", my_giveaways),
         CommandHandler("cancelgiveaway", cancel_giveaway),

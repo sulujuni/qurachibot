@@ -1067,6 +1067,7 @@ async function renderGames() {
             const badge = g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
                 : `<span class="game-badge badge-ended">${t('ended')}</span>`;
             const isActive = g.status === 'active';
+            const notifyLabel = currentLang === 'uz' ? "Xabar" : currentLang === 'ru' ? 'Увед.' : 'Notify';
 
             html += `<div class="game-item" style="flex-direction:column;align-items:stretch;">
                 <div style="display:flex;align-items:center;gap:13px;width:100%;">
@@ -1079,8 +1080,11 @@ async function renderGames() {
                 </div>
                 ${isActive ? `<div style="display:flex;gap:7px;margin-top:10px;flex-wrap:wrap;">
                     <button class="btn btn-primary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;" onclick="myGameDraw(${g.id})">${ic('dice',14)} ${drawLabel}</button>
-                    <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;" onclick="myGameCancel(${g.id})">${ic('x',14)} ${cancelLabel}</button>
+                    <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;" onclick="myGameNotify(${g.id})">${ic('bell',14)} ${notifyLabel}</button>
                     <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;" onclick="myGameShare(${g.id})">${ic('send',14)} ${shareLabel}</button>
+                </div>
+                <div style="display:flex;gap:7px;margin-top:6px;">
+                    <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;opacity:0.7;" onclick="myGameCancel(${g.id})">${ic('x',14)} ${cancelLabel}</button>
                 </div>` : ''}
             </div>`;
         });
@@ -1134,6 +1138,38 @@ function myGameShare(id) {
     const deepLink = `https://t.me/${botUser}?start=gw_${id}`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}`;
     window.open(shareUrl, '_blank');
+}
+
+async function myGameNotify(id) {
+    const el = document.getElementById('content');
+    const msgLabel = currentLang === 'uz' ? "Ishtirokchilarga xabar yozing:" :
+        currentLang === 'ru' ? 'Напишите сообщение участникам:' : 'Write a message to participants:';
+    const sendLabel = currentLang === 'uz' ? "📢 Yuborish" : currentLang === 'ru' ? '📢 Отправить' : '📢 Send';
+    const backLabel = currentLang === 'uz' ? "← Orqaga" : currentLang === 'ru' ? '← Назад' : '← Back';
+
+    el.innerHTML = `
+    <div class="card">
+        <div style="display:flex;align-items:center;gap:11px;margin-bottom:14px;">
+            <span class="back-btn" onclick="switchTab('games')">${ic('back')}</span>
+            <div class="card-title" style="margin-bottom:0;"><span class="ci">${ic('bell')}</span>${msgLabel}</div>
+        </div>
+        <div class="form-group">
+            <textarea class="form-textarea" id="notifyText" style="min-height:100px;" placeholder="${msgLabel}"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="sendGameNotify(${id})">${sendLabel}</button>
+    </div>`;
+}
+
+async function sendGameNotify(id) {
+    const text = document.getElementById('notifyText').value.trim();
+    if (!text) { showToast(currentLang === 'uz' ? 'Xabar yozing!' : 'Write a message!', 'error'); return; }
+    const res = await api('/notify-participants', 'POST', {giveaway_id: id, text: text});
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(currentLang === 'uz' ? `✅ ${res.sent || 0} ishtirokchiga yuborildi!` :
+        currentLang === 'ru' ? `✅ Отправлено ${res.sent || 0} участникам!` :
+        `✅ Sent to ${res.sent || 0} participants!`);
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    switchTab('games');
 }
 </script>
 

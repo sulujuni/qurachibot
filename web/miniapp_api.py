@@ -1286,6 +1286,60 @@ async def miniapp_create_comment_giveaway(
 # ─── Admin Broadcast ─────────────────────────────────────────────────────────
 
 
+@router.post("/notify-participants")
+async def miniapp_notify_participants(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Notify all participants of a giveaway with a custom message."""
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    body = await request.json()
+    giveaway_id = body.get("giveaway_id")
+    text = body.get("text", "").strip()
+
+    if not giveaway_id or not text:
+        return {"error": "giveaway_id va text kerak"}
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(Giveaway.id == giveaway_id)
+        )
+        giveaway = result.scalar_one_or_none()
+
+        if not giveaway:
+            return {"error": "O'yin topilmadi"}
+        if giveaway.creator_id != user_id and user_id not in settings.ADMIN_IDS:
+            return {"error": "Faqat yaratuvchi xabar yubora oladi"}
+
+        # Get participants
+        result = await session.execute(
+            select(GiveawayParticipant).where(
+                GiveawayParticipant.giveaway_id == giveaway_id
+            )
+        )
+        participants = result.scalars().all()
+
+    if not participants:
+        return {"error": "Ishtirokchilar yo'q", "sent": 0}
+
+    from telegram import Bot
+    bot = Bot(token=settings.BOT_TOKEN)
+
+    sent = 0
+    failed = 0
+    for p in participants:
+        try:
+            await bot.send_message(p.user_id, text, parse_mode="HTML")
+            sent += 1
+        except Exception:
+            failed += 1
+
+    logger.info("Creator notify: gw=%d, sent=%d, failed=%d, by=%d", giveaway_id, sent, failed, user_id)
+    return {"success": True, "sent": sent, "failed": failed}
+
+
 @router.post("/admin/broadcast")
 async def admin_broadcast(
     request: Request,

@@ -346,10 +346,23 @@ async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
                 lines.append(f"🏆 {get_text('alert_winners_label', lang)}: {gw.winner_count}")
                 lines.append("")
                 lines.append(get_text("alert_giveaway_cta", lang))
+
+                # Build Join button
+                from bot.config import settings
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+                web_url = settings.WEB_URL
+                join_label = f"🎮 {get_text('gw_join_button', lang=lang)}"
+                if web_url:
+                    url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={gw.id}"
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, web_app=WebAppInfo(url=url))]])
+                else:
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, callback_data=f"join_gw_{gw.id}")]])
+
                 await context.bot.send_message(
                     sub.user_id,
                     "\n".join(lines),
                     parse_mode="HTML",
+                    reply_markup=kb,
                 )
 
             for ct in new_contests:
@@ -364,10 +377,21 @@ async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:
                     lines.append(f"🎁 {get_text('alert_prize_label', lang)}: {ct.prize}")
                 lines.append("")
                 lines.append(get_text("alert_contest_cta", lang))
+
+                # Build Submit button
+                from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                kb = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        f"📤 {get_text('ct_submit_button', lang=lang)}",
+                        callback_data=f"submit_contest_{ct.id}"
+                    )
+                ]])
+
                 await context.bot.send_message(
                     sub.user_id,
                     "\n".join(lines),
                     parse_mode="HTML",
+                    reply_markup=kb,
                 )
         except Exception:
             pass  # User blocked bot or other error
