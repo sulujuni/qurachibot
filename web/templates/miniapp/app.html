@@ -1052,6 +1052,42 @@ async function renderGames() {
                 <div class="stat-box"><div class="stat-val">${data.referral.points}</div><div class="stat-lbl">${t('my_points')}</div></div>
             </div></div>`;
     }
+
+    // Created games — interactive with actions
+    html += `<div class="card"><div class="card-title"><span class="ci">${ic('megaphone')}</span>${t('created_games')}</div>`;
+    if (!data.created?.length) {
+        html += emptyState('plus', t('no_created'));
+    } else {
+        const drawLabel = currentLang === 'uz' ? "Qur'a" : currentLang === 'ru' ? 'Розыгрыш' : 'Draw';
+        const cancelLabel = currentLang === 'uz' ? "Bekor" : currentLang === 'ru' ? 'Отмена' : 'Cancel';
+        const shareLabel = currentLang === 'uz' ? "Ulashish" : currentLang === 'ru' ? 'Поделиться' : 'Share';
+        const viewLabel = currentLang === 'uz' ? "Ishtirokchilar" : currentLang === 'ru' ? 'Участники' : 'Participants';
+
+        data.created.forEach(g => {
+            const badge = g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
+                : `<span class="game-badge badge-ended">${t('ended')}</span>`;
+            const isActive = g.status === 'active';
+
+            html += `<div class="game-item" style="flex-direction:column;align-items:stretch;">
+                <div style="display:flex;align-items:center;gap:13px;width:100%;">
+                    <div class="game-icon">${ic('megaphone')}</div>
+                    <div class="game-info">
+                        <div class="game-title">${g.title}</div>
+                        <div class="game-meta">${ic('users',13)} ${g.participants} · ${ic('trophy',13)} ${g.winner_count || 1} · ${timeAgo(g.created_at)}</div>
+                    </div>
+                    ${badge}
+                </div>
+                ${isActive ? `<div style="display:flex;gap:7px;margin-top:10px;flex-wrap:wrap;">
+                    <button class="btn btn-primary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;" onclick="myGameDraw(${g.id})">${ic('dice',14)} ${drawLabel}</button>
+                    <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;" onclick="myGameCancel(${g.id})">${ic('x',14)} ${cancelLabel}</button>
+                    <button class="btn btn-secondary" style="padding:9px 13px;font-size:12px;flex:1;min-width:0;margin-top:0;" onclick="myGameShare(${g.id})">${ic('send',14)} ${shareLabel}</button>
+                </div>` : ''}
+            </div>`;
+        });
+    }
+    html += '</div>';
+
+    // Participated games
     html += `<div class="card"><div class="card-title"><span class="ci">${ic('dice')}</span>${t('participated_games')}</div>`;
     if (!data.participated?.length) {
         html += emptyState('dice', t('no_participated'));
@@ -1060,32 +1096,44 @@ async function renderGames() {
             const badge = g.won ? `<span class="game-badge badge-won">${ic('trophy',12)} ${t('won')}</span>`
                 : g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
                 : `<span class="game-badge badge-ended">${t('ended')}</span>`;
-            html += `<div class="game-item">
+            html += `<div class="game-item" onclick="openGiveaway(${g.id})" style="cursor:pointer;">
                 <div class="game-icon${g.won ? ' gold' : ''}">${ic(g.won ? 'trophy' : 'gift')}</div>
                 <div class="game-info">
                     <div class="game-title">${g.title}</div>
-                    <div class="game-meta">${ic('gift',13)} ${g.prize} · ${timeAgo(g.created_at)}</div>
-                </div>${badge}</div>`;
-        });
-    }
-    html += '</div>';
-    html += `<div class="card"><div class="card-title"><span class="ci">${ic('megaphone')}</span>${t('created_games')}</div>`;
-    if (!data.created?.length) {
-        html += emptyState('plus', t('no_created'));
-    } else {
-        data.created.forEach(g => {
-            const badge = g.status === 'active' ? `<span class="game-badge badge-active">${t('active')}</span>`
-                : `<span class="game-badge badge-ended">${t('ended')}</span>`;
-            html += `<div class="game-item">
-                <div class="game-icon">${ic('megaphone')}</div>
-                <div class="game-info">
-                    <div class="game-title">${g.title}</div>
-                    <div class="game-meta">${ic('users',13)} ${g.participants} · ${timeAgo(g.created_at)}</div>
+                    <div class="game-meta">${g.prize ? ic('gift',13) + ' ' + g.prize + ' · ' : ''}${timeAgo(g.created_at)}</div>
                 </div>${badge}</div>`;
         });
     }
     html += '</div>';
     el.innerHTML = html;
+}
+
+async function myGameDraw(id) {
+    const confirmMsg = currentLang === 'uz' ? "G'oliblarni hozir aniqlamoqchimisiz?" :
+        currentLang === 'ru' ? 'Определить победителей сейчас?' : 'Draw winners now?';
+    if (!confirm(confirmMsg)) return;
+    const res = await api(`/admin/draw/${id}`, 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(`🎉 ${res.winners ? res.winners.join(', ') : 'Done!'}`);
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    renderGames();
+}
+
+async function myGameCancel(id) {
+    const confirmMsg = currentLang === 'uz' ? "Bu o'yinni bekor qilmoqchimisiz?" :
+        currentLang === 'ru' ? 'Отменить эту игру?' : 'Cancel this game?';
+    if (!confirm(confirmMsg)) return;
+    const res = await api(`/admin/cancel/${id}`, 'POST');
+    if (res.error) { showToast(res.error, 'error'); return; }
+    showToast(currentLang === 'uz' ? '❌ Bekor qilindi' : currentLang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+    renderGames();
+}
+
+function myGameShare(id) {
+    const botUser = 'qurachibot';
+    const deepLink = `https://t.me/${botUser}?start=gw_${id}`;
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}`;
+    window.open(shareUrl, '_blank');
 }
 </script>
 
