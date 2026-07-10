@@ -561,6 +561,8 @@ async def miniapp_create_giveaway(
     async with async_session() as session:
         giveaway = Giveaway(
             title=title, post_text=post_text,
+            post_file_id=body.get("post_file_id") or None,
+            post_media_type="photo" if body.get("post_file_id") else None,
             winner_count=winner_count,
             required_channels=channels_str,
             creator_id=user_id, creator_username=username,
@@ -572,6 +574,122 @@ async def miniapp_create_giveaway(
         await session.refresh(giveaway)
 
     return {"success": True, "id": giveaway.id, "title": giveaway.title}
+
+
+@router.post("/upload-photo")
+async def miniapp_upload_photo(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Upload a photo for a giveaway post. Returns a Telegram file_id.
+
+    The photo is sent to the creator's own chat via the bot, then deleted.
+    This gives us a file_id we can reuse when publishing the giveaway.
+    """
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    # Accept multipart form data with file
+    from fastapi import UploadFile, File, Form
+    form = await request.form()
+    file = form.get("photo")
+    if not file:
+        return {"error": "No photo uploaded"}
+
+    # Read file bytes
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:  # 10MB limit
+        return {"error": "File too large (max 10MB)"}
+
+    # Send photo to the user via bot to get file_id, then delete
+    from telegram import Bot, InputFile
+    import io
+    bot = Bot(token=settings.BOT_TOKEN)
+
+    try:
+        msg = await bot.send_photo(
+            user_id,
+            photo=InputFile(io.BytesIO(contents), filename=file.filename or "photo.jpg"),
+            caption="📷 Rasm yuklandi (tez orada o'chiriladi)",
+        )
+        file_id = msg.photo[-1].file_id
+        # Delete the temp message
+        try:
+            await bot.delete_message(user_id, msg.message_id)
+        except Exception:
+            pass
+        return {"success": True, "file_id": file_id}
+    except Exception as e:
+        logger.error("Photo upload failed: %s", e)
+        return {"error": "Failed to upload photo. Make sure you've started the bot first."}
+
+
+@router.post("/share-to-channel")
+async def miniapp_share_to_channel(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Send the full giveaway post (with photo + join button) to a channel/group.
+
+    Creator specifies the channel/group by ID or @username.
+    """
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    body = await request.json()
+    giveaway_id = body.get("giveaway_id")
+    channel = body.get("channel")  # @username or numeric ID
+
+    if not giveaway_id or not channel:
+        return {"error": "giveaway_id va channel kerak"}
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway).where(Giveaway.id == giveaway_id)
+        )
+        giveaway = result.scalar_one_or_none()
+
+    if not giveaway:
+        return {"error": "O'yin topilmadi"}
+    if giveaway.creator_id != user_id and user_id not in settings.ADMIN_IDS:
+        return {"error": "Faqat yaratuvchi ulasha oladi"}
+
+    from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    bot = Bot(token=settings.BOT_TOKEN)
+
+    # Build join button
+    from bot.utils.lang import get_user_lang
+    lang = await get_user_lang(user_id)
+    from bot.i18n import get_text
+    label = f"🎮 {get_text('gw_join_button', lang=lang)} (0)"
+    web_url = settings.WEB_URL
+    if web_url:
+        url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={giveaway.id}"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(label, web_app=WebAppInfo(url=url))]])
+    else:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"join_gw_{giveaway.id}")]])
+
+    # Send the full post to the channel
+    try:
+        if giveaway.post_file_id and giveaway.post_media_type == "photo":
+            await bot.send_photo(
+                channel, giveaway.post_file_id,
+                caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
+            )
+        elif giveaway.post_file_id and giveaway.post_media_type == "video":
+            await bot.send_video(
+                channel, giveaway.post_file_id,
+                caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
+            )
+        else:
+            await bot.send_message(
+                channel, giveaway.post_text or giveaway.title,
+                parse_mode="HTML", reply_markup=kb,
+            )
+        return {"success": True}
+    except Exception as e:
+        logger.error("Share to channel failed: %s", e)
+        return {"error": f"Yuborib bo'lmadi: {str(e)[:100]}"}
 
 
 @router.post("/create-contest")
@@ -1266,6 +1384,8 @@ async def miniapp_create_comment_giveaway(
     async with async_session() as session:
         gw = GroupGiveaway(
             title=title, post_text=post_text,
+            post_file_id=body.get("post_file_id") or None,
+            post_media_type="photo" if body.get("post_file_id") else None,
             winner_count=max(1, int(body.get("winner_count", 1))),
             mode=mode,
             keyword=keyword,

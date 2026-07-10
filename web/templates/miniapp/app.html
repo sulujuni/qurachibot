@@ -1550,21 +1550,41 @@ function setCreateType(type) { createType = type; renderCreate(); }
 
 function renderCreateForm() {
     const f = document.getElementById('createForm');
-    const postHint = currentLang === 'uz' ? "O'yin postini o'zingiz xohlagan formatda yozing (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). Rasm/video qo'shish uchun botga yuboring." :
-        currentLang === 'ru' ? 'Напишите пост розыгрыша в любом формате (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). Для медиа — отправьте через бота.' :
-        'Write your giveaway post in any format (HTML: &lt;b&gt;, &lt;i&gt;, &lt;a&gt;). For media, send via bot.';
-    const mediaHint = currentLang === 'uz' ? "📷 Rasm/video bilan post yaratish uchun botga /newgiveaway, /groupgiveaway yoki /newcontest yuboring." :
-        currentLang === 'ru' ? '📷 Для поста с фото/видео отправьте /newgiveaway, /groupgiveaway или /newcontest боту.' :
-        '📷 For posts with photos/videos, send /newgiveaway, /groupgiveaway or /newcontest to the bot.';
+    const postHint = currentLang === 'uz' ? "O'yin postini yozing..." :
+        currentLang === 'ru' ? 'Напишите пост...' : 'Write your post...';
+    const photoLabel = currentLang === 'uz' ? "📷 Rasm qo'shish" :
+        currentLang === 'ru' ? '📷 Добавить фото' : '📷 Add photo';
+    const previewLabel = currentLang === 'uz' ? "👁 Ko'rib chiqish" :
+        currentLang === 'ru' ? '👁 Предпросмотр' : '👁 Preview';
+
+    // Common post input + photo upload + preview block
+    const postBlock = `
+        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
+            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}" oninput="updatePreview()"></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">${photoLabel}</label>
+            <input type="file" id="cPhotoInput" accept="image/*" style="display:none;" onchange="handlePhotoUpload(this)">
+            <button type="button" class="btn btn-secondary" style="margin-top:0;padding:12px;" onclick="document.getElementById('cPhotoInput').click()">
+                ${ic('image',17)} ${photoLabel}
+            </button>
+            <div id="photoPreviewThumb" style="margin-top:8px;display:none;">
+                <img id="photoThumb" style="max-width:100%;max-height:150px;border-radius:var(--radius-xs);object-fit:cover;">
+                <button type="button" style="margin-top:6px;font-size:12px;color:var(--red);background:none;border:none;cursor:pointer;" onclick="removePhoto()">✕ ${currentLang==='uz'?'Rasmni olib tashlash':currentLang==='ru'?'Удалить фото':'Remove photo'}</button>
+            </div>
+        </div>
+        <div id="postPreview" class="card" style="display:none;margin-bottom:14px;padding:14px;">
+            <div style="font-size:11px;font-weight:700;color:var(--text-hint);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">${previewLabel}</div>
+            <img id="previewImg" style="display:none;max-width:100%;border-radius:var(--radius-xs);margin-bottom:8px;">
+            <div id="previewText" style="font-size:13.5px;line-height:1.5;white-space:pre-wrap;"></div>
+        </div>`;
 
     if (createType === 'comment') {
         f.innerHTML = `
         <div class="info-box">
             <b>${t('comment_giveaway')}</b><br>${t('gw_desc_cmt')}
         </div>
-        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
-            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
-            <div class="form-hint">${mediaHint}</div></div>
+        ${postBlock}
         <div class="form-group"><label class="form-label">${t('f_mode')}</label>
             <select class="form-select" id="cMode">
                 <option value="random">${t('m_random')}</option>
@@ -1599,9 +1619,7 @@ function renderCreateForm() {
         <div class="info-box">
             <b>${t('contest')}</b><br>${t('gw_desc_ct')}
         </div>
-        <div class="form-group"><label class="form-label">${t('f_post_content')} *</label>
-            <textarea class="form-textarea" id="cPostText" style="min-height:120px;" placeholder="${postHint}"></textarea>
-            <div class="form-hint">${mediaHint}</div></div>
+        ${postBlock}
         <div class="form-group"><label class="form-label">${t('f_ctype')}</label>
             <select class="form-select" id="cContestType">
                 <option value="text">${t('opt_text')}</option>
@@ -1646,6 +1664,81 @@ function renderBroadcastForm() {
 
 
 <script>
+// ─── Photo upload + preview helpers ──────────────────────────────────────────
+let uploadedFileId = null;
+let uploadedPhotoDataUrl = null;
+
+function updatePreview() {
+    const text = document.getElementById('cPostText')?.value || '';
+    const preview = document.getElementById('postPreview');
+    const previewText = document.getElementById('previewText');
+    const previewImg = document.getElementById('previewImg');
+    if (!preview || !previewText) return;
+
+    if (text.trim() || uploadedPhotoDataUrl) {
+        preview.style.display = 'block';
+        previewText.textContent = text;
+        if (uploadedPhotoDataUrl) {
+            previewImg.src = uploadedPhotoDataUrl;
+            previewImg.style.display = 'block';
+        } else {
+            previewImg.style.display = 'none';
+        }
+    } else {
+        preview.style.display = 'none';
+    }
+}
+
+async function handlePhotoUpload(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    // Show local thumbnail immediately
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        uploadedPhotoDataUrl = e.target.result;
+        const thumb = document.getElementById('photoThumb');
+        const thumbBox = document.getElementById('photoPreviewThumb');
+        if (thumb && thumbBox) {
+            thumb.src = uploadedPhotoDataUrl;
+            thumbBox.style.display = 'block';
+        }
+        updatePreview();
+    };
+    reader.readAsDataURL(file);
+
+    // Upload to server to get file_id
+    const formData = new FormData();
+    formData.append('photo', file);
+    try {
+        const res = await fetch(`${BASE}/miniapp/api/upload-photo`, {
+            method: 'POST',
+            headers: { 'X-Telegram-Init-Data': tg.initData },
+            body: formData,
+        });
+        const data = await res.json();
+        if (data.file_id) {
+            uploadedFileId = data.file_id;
+            showToast(currentLang === 'uz' ? '📷 Rasm yuklandi!' : currentLang === 'ru' ? '📷 Фото загружено!' : '📷 Photo uploaded!');
+        } else {
+            showToast(data.error || 'Upload failed', 'error');
+        }
+    } catch(e) {
+        showToast('Upload error', 'error');
+    }
+}
+
+function removePhoto() {
+    uploadedFileId = null;
+    uploadedPhotoDataUrl = null;
+    const thumbBox = document.getElementById('photoPreviewThumb');
+    if (thumbBox) thumbBox.style.display = 'none';
+    const input = document.getElementById('cPhotoInput');
+    if (input) input.value = '';
+    updatePreview();
+}
+
+
 async function submitCommentGiveaway() {
     const postText = document.getElementById('cPostText').value.trim();
     if (!postText) { showToast(t('f_post_required'), 'error'); return; }
@@ -1662,6 +1755,7 @@ async function submitCommentGiveaway() {
 
     const body = {
         post_text: postText,
+        post_file_id: uploadedFileId || null,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         duration: duration,
         deadline: deadline,
@@ -1672,6 +1766,7 @@ async function submitCommentGiveaway() {
     const res = await api('/create-comment-giveaway', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    uploadedFileId = null; uploadedPhotoDataUrl = null;
     showCreatedSharePrompt(res.id, 'gg');
 }
 
@@ -1691,6 +1786,7 @@ async function submitContest() {
 
     const body = {
         post_text: postText,
+        post_file_id: uploadedFileId || null,
         contest_type: document.getElementById('cContestType').value,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         add_join_button: addJoinBtn,
@@ -1701,17 +1797,20 @@ async function submitContest() {
     const res = await api('/create-contest', 'POST', body);
     if (res.error) { showToast(res.error, 'error'); return; }
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    uploadedFileId = null; uploadedPhotoDataUrl = null;
     showCreatedSharePrompt(res.id, 'ct');
 }
 
 function showCreatedSharePrompt(gameId, gameType) {
     const el = document.getElementById('content');
-    const botUser = 'qurachibot';  // TODO: get from API
+    const botUser = 'qurachibot';
     const deepLink = `https://t.me/${botUser}?start=${gameType}_${gameId}`;
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(t('gw_created_success'))}`;
 
-    const shareLabel = currentLang === 'uz' ? "📢 Kanalga/Guruhga ulashish" :
-        currentLang === 'ru' ? '📢 Поделиться в канал/группу' : '📢 Share to channel/group';
+    const sendToChannelLabel = currentLang === 'uz' ? "📢 Kanalga to'liq postni yuborish" :
+        currentLang === 'ru' ? '📢 Отправить полный пост в канал' : '📢 Send full post to channel';
+    const channelPlaceholder = currentLang === 'uz' ? "@kanal_username yoki ID" :
+        currentLang === 'ru' ? '@канал или ID' : '@channel or ID';
+    const sendBtn = currentLang === 'uz' ? "Yuborish" : currentLang === 'ru' ? 'Отправить' : 'Send';
     const copyLabel = currentLang === 'uz' ? "🔗 Havolani nusxalash" :
         currentLang === 'ru' ? '🔗 Скопировать ссылку' : '🔗 Copy link';
     const doneLabel = currentLang === 'uz' ? "✅ Tayyor" :
@@ -1722,17 +1821,43 @@ function showCreatedSharePrompt(gameId, gameType) {
         <div style="font-size:48px;margin-bottom:16px;">${ic('checkCircle', 48)}</div>
         <div style="font-size:18px;font-weight:800;margin-bottom:8px;">${t('gw_created_success')}</div>
         <p style="font-size:13px;color:var(--text-hint);margin-bottom:20px;">
-            ${currentLang === 'uz' ? "Endi o'yinni kanalingizga yoki guruhingizga ulashing:" :
-              currentLang === 'ru' ? 'Теперь поделитесь игрой в канал или группу:' :
-              'Now share the game to your channel or group:'}
+            ${currentLang === 'uz' ? "Endi o'yinni kanalingizga yuboring:" :
+              currentLang === 'ru' ? 'Теперь отправьте в канал:' :
+              'Now send it to your channel:'}
         </p>
-        <a href="${shareUrl}" target="_blank" class="btn btn-primary" style="text-decoration:none;margin-bottom:10px;">${shareLabel}</a>
+
+        <div style="text-align:left;margin-bottom:16px;">
+            <label style="font-size:12px;font-weight:600;color:var(--text-hint);display:block;margin-bottom:6px;">${sendToChannelLabel}</label>
+            <div style="display:flex;gap:8px;">
+                <input class="form-input" id="shareChannelInput" placeholder="${channelPlaceholder}" style="flex:1;">
+                <button class="btn btn-primary" style="width:auto;padding:12px 18px;min-height:auto;" onclick="shareFullPost(${gameId},'${gameType}')">${sendBtn}</button>
+            </div>
+            <div class="form-hint" id="shareStatus"></div>
+        </div>
+
         <button class="btn btn-secondary" style="margin-top:0;" onclick="navigator.clipboard.writeText('${deepLink}');showToast(t('copied'));">${copyLabel}</button>
         <button class="btn btn-secondary" style="margin-top:10px;opacity:0.7;" onclick="switchTab('home')">${doneLabel}</button>
     </div>`;
 
     // Celebration!
     fireConfetti();
+}
+
+async function shareFullPost(gameId, gameType) {
+    const channel = document.getElementById('shareChannelInput').value.trim();
+    const status = document.getElementById('shareStatus');
+    if (!channel) { showToast(currentLang === 'uz' ? 'Kanal kiriting!' : 'Enter channel!', 'error'); return; }
+
+    status.textContent = '⏳...';
+    const res = await api('/share-to-channel', 'POST', { giveaway_id: gameId, channel: channel });
+    if (res.error) {
+        status.textContent = '❌ ' + res.error;
+        status.style.color = 'var(--red)';
+    } else {
+        status.textContent = currentLang === 'uz' ? '✅ Kanalga yuborildi!' : currentLang === 'ru' ? '✅ Отправлено!' : '✅ Sent!';
+        status.style.color = 'var(--green)';
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    }
 }
 
 async function sendBroadcast() {
