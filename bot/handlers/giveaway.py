@@ -686,6 +686,223 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(result_text, parse_mode="HTML")
 
 
+# ─── Edit Menu ────────────────────────────────────────────────────────────────
+
+
+def _edit_menu_keyboard(giveaway_id: int, lang: str) -> InlineKeyboardMarkup:
+    """Build the edit menu inline keyboard (6 fields)."""
+    labels = {
+        "uz": ["⏳ Boshlanish vaqti", "⌛️ Tugash vaqti", "🏆 G'oliblar soni", "📑 Tavsif/Post", "🖼 Rasm/GIF", "✅ Obuna kanallar"],
+        "ru": ["⏳ Время начала", "⌛️ Время окончания", "🏆 Кол-во победителей", "📑 Описание", "🖼 Фото/GIF", "✅ Каналы подписки"],
+        "en": ["⏳ Start time", "⌛️ End time", "🏆 Winners", "📑 Description", "🖼 Photo/GIF", "✅ Sub channels"],
+    }
+    btns = labels.get(lang, labels["uz"])
+    gid = giveaway_id
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(btns[0], callback_data=f"gwedit_start_{gid}"),
+         InlineKeyboardButton(btns[1], callback_data=f"gwedit_end_{gid}")],
+        [InlineKeyboardButton(btns[2], callback_data=f"gwedit_winners_{gid}"),
+         InlineKeyboardButton(btns[3], callback_data=f"gwedit_text_{gid}")],
+        [InlineKeyboardButton(btns[4], callback_data=f"gwedit_photo_{gid}"),
+         InlineKeyboardButton(btns[5], callback_data=f"gwedit_channels_{gid}")],
+    ])
+
+
+async def _show_edit_summary(bot, chat_id, giveaway, lang):
+    """Send giveaway summary + edit menu."""
+    start_txt = giveaway.scheduled_start.strftime("%Y-%m-%d %H:%M") if giveaway.scheduled_start else "Hozir/Joylangan"
+    end_txt = giveaway.ends_at.strftime("%Y-%m-%d %H:%M") if giveaway.ends_at else "♾"
+    ch_title = ""
+    if giveaway.channel_id:
+        try:
+            chat_info = await bot.get_chat(giveaway.channel_id)
+            ch_title = chat_info.title or str(giveaway.channel_id)
+        except Exception:
+            ch_title = str(giveaway.channel_id)
+
+    status_labels = {"draft": "📝 Draft", "queued": "⏳ Navbatda", "active": "🟢 Faol", "completed": "✅ Tugagan", "cancelled": "❌ Bekor"}
+    summary = (
+        f"📋 <b>{giveaway.title}</b>\n\n"
+        f"📊 Holat: {status_labels.get(giveaway.status.value, giveaway.status.value)}\n"
+        f"📢 Kanal: {ch_title or '—'}\n"
+        f"🏆 G'oliblar: {giveaway.winner_count}\n"
+        f"⏳ Boshlanish: {start_txt}\n"
+        f"⌛️ Tugash: {end_txt}\n"
+        f"📢 Obuna: {giveaway.required_channels or '—'}\n"
+    )
+    kb = _edit_menu_keyboard(giveaway.id, lang)
+    await bot.send_message(chat_id, summary, reply_markup=kb, parse_mode="HTML")
+
+
+async def edit_giveaway_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show edit menu for a giveaway. Command: /edit <id>"""
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    if not context.args:
+        # Show list of editable giveaways
+        async with async_session() as session:
+            result = await session.execute(
+                select(Giveaway).where(
+                    Giveaway.creator_id == user_id,
+                    Giveaway.status.in_([GiveawayStatus.DRAFT, GiveawayStatus.QUEUED, GiveawayStatus.ACTIVE]),
+                )
+            )
+            giveaways = result.scalars().all()
+        if not giveaways:
+            await update.message.reply_text("Tahrir qilish uchun o'yinlar yo'q." if lang == "uz" else "No games to edit.")
+            return
+        gw_list = "\n".join(f"• <code>/edit {gw.id}</code> — {gw.title}" for gw in giveaways)
+        await update.message.reply_text(f"✏️ <b>Tahrirlash</b>\n\n{gw_list}", parse_mode="HTML")
+        return
+
+    try:
+        giveaway_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ ID noto'g'ri.")
+        return
+
+    async with async_session() as session:
+        result = await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
+        giveaway = result.scalar_one_or_none()
+
+    if not giveaway or giveaway.creator_id != user_id:
+        await update.message.reply_text("❌ Topilmadi yoki sizniki emas.")
+        return
+    if giveaway.status == GiveawayStatus.COMPLETED or giveaway.status == GiveawayStatus.CANCELLED:
+        await update.message.reply_text("❌ Tugagan o'yinni tahrir qilib bo'lmaydi.")
+        return
+
+    await _show_edit_summary(context.bot, update.effective_chat.id, giveaway, lang)
+
+
+async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle edit menu button press — ask for new value."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data  # gwedit_<field>_<id>
+    parts = data.split("_")
+    field = parts[1]
+    giveaway_id = int(parts[2])
+    lang = await get_user_lang(query.from_user.id)
+
+    # Store editing state
+    context.user_data["editing_gw_id"] = giveaway_id
+    context.user_data["editing_field"] = field
+
+    prompts = {
+        "start": "⏳ Yangi boshlanish vaqtini kiriting: <code>2025-12-31 21:00</code>" if lang == "uz" else "⏳ Enter new start time:",
+        "end": "⌛️ Yangi tugash vaqtini kiriting: <code>2025-12-31 23:59</code>" if lang == "uz" else "⌛️ Enter new end time:",
+        "winners": "🏆 Yangi g'oliblar sonini kiriting (raqam):" if lang == "uz" else "🏆 Enter new winner count:",
+        "text": "📑 Yangi tavsif/post matnini yuboring:" if lang == "uz" else "📑 Send new description/post text:",
+        "photo": "🖼 Yangi rasm yoki GIF yuboring (yoki matn yuboring o'chirish uchun):" if lang == "uz" else "🖼 Send new photo/GIF (or text to remove):",
+        "channels": "📢 Yangi obuna kanallarni kiriting (vergul bilan):\nMisol: @kanal1, @kanal2\n\n/skip — o'chirish" if lang == "uz" else "📢 Enter channels (comma-separated) or /skip to remove:",
+    }
+    await query.edit_message_text(prompts.get(field, "?"), parse_mode="HTML")
+
+
+async def edit_field_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Receive the new value for the field being edited."""
+    giveaway_id = context.user_data.get("editing_gw_id")
+    field = context.user_data.get("editing_field")
+    if not giveaway_id or not field:
+        return  # Not in edit mode
+
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+    message = update.message
+
+    async with async_session() as session:
+        result = await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))
+        giveaway = result.scalar_one_or_none()
+        if not giveaway or giveaway.creator_id != user_id:
+            context.user_data.pop("editing_gw_id", None)
+            context.user_data.pop("editing_field", None)
+            return
+
+        updated = False
+        if field == "start":
+            try:
+                parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+                if parsed <= datetime.utcnow():
+                    await message.reply_text("❌ Vaqt o'tgan." if lang == "uz" else "❌ Time has passed.")
+                    return
+                giveaway.scheduled_start = parsed
+                updated = True
+            except ValueError:
+                await message.reply_text("❌ Format: <code>2025-12-31 21:00</code>", parse_mode="HTML")
+                return
+
+        elif field == "end":
+            try:
+                parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+                giveaway.ends_at = parsed
+                updated = True
+            except ValueError:
+                await message.reply_text("❌ Format: <code>2025-12-31 23:59</code>", parse_mode="HTML")
+                return
+
+        elif field == "winners":
+            try:
+                count = int(message.text.strip())
+                if count < 1:
+                    raise ValueError
+                giveaway.winner_count = count
+                updated = True
+            except ValueError:
+                await message.reply_text("❌ Raqam kiriting (1+)." if lang == "uz" else "❌ Enter a number (1+).")
+                return
+
+        elif field == "text":
+            post_data = _extract_post_data(message)
+            giveaway.post_text = post_data["post_text"]
+            if post_data["post_file_id"]:
+                giveaway.post_file_id = post_data["post_file_id"]
+                giveaway.post_media_type = post_data["post_media_type"]
+            # Update title
+            import re
+            plain = re.sub(r"<[^>]+>", "", giveaway.post_text or "")
+            giveaway.title = plain.strip().split("\n")[0][:100] or giveaway.title
+            updated = True
+
+        elif field == "photo":
+            if message.photo:
+                giveaway.post_file_id = message.photo[-1].file_id
+                giveaway.post_media_type = "photo"
+                updated = True
+            elif message.document:
+                giveaway.post_file_id = message.document.file_id
+                giveaway.post_media_type = "document"
+                updated = True
+            elif message.animation:
+                giveaway.post_file_id = message.animation.file_id
+                giveaway.post_media_type = "animation"
+                updated = True
+            else:
+                # Text message = remove photo
+                giveaway.post_file_id = None
+                giveaway.post_media_type = None
+                updated = True
+
+        elif field == "channels":
+            text = message.text.strip()
+            if text.lower() == "/skip":
+                giveaway.required_channels = None
+            else:
+                giveaway.required_channels = text
+            updated = True
+
+        if updated:
+            await session.commit()
+            await message.reply_text("✅ O'zgartirildi!" if lang == "uz" else "✅ Updated!")
+            # Clear edit state
+            context.user_data.pop("editing_gw_id", None)
+            context.user_data.pop("editing_field", None)
+            # Re-show edit menu
+            await session.refresh(giveaway)
+            await _show_edit_summary(context.bot, message.chat_id, giveaway, lang)
+
+
 # ─── My Giveaways ───────────────────────────────────────────────────────────────
 
 
@@ -963,7 +1180,9 @@ def get_giveaway_handlers() -> list:
         create_conv,
         notify_conv,
         CommandHandler("draw", draw_giveaway),
+        CommandHandler("edit", edit_giveaway_command),
         CommandHandler("mygiveaways", my_giveaways),
         CommandHandler("cancelgiveaway", cancel_giveaway),
         CallbackQueryHandler(join_giveaway_callback, pattern=r"^join_gw_\d+$"),
+        CallbackQueryHandler(edit_field_callback, pattern=r"^gwedit_"),
     ]

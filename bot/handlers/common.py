@@ -784,6 +784,12 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
         await jf_receive_channel(update, context)
         return
 
+    # Edit mode: forward to giveaway edit handler
+    if context.user_data.get("editing_field"):
+        from bot.handlers.giveaway import edit_field_value
+        await edit_field_value(update, context)
+        return
+
     # Bug report: save user's message as feedback
     if context.user_data.get("awaiting_bug_report"):
         context.user_data.pop("awaiting_bug_report", None)
