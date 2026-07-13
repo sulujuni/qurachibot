@@ -2,6 +2,12 @@
 
 These endpoints are called by the Telegram Mini App (Web App) when users
 tap the 'Qatnashish' inline button on a giveaway announcement.
+
+Security model:
+- Public endpoints (stats, active-giveaways, active-contests): no auth, no PII
+- User endpoints (/me, /my-games, /points, etc.): require valid Telegram initData (HMAC)
+- Admin endpoints (/admin/*): require valid initData from ADMIN_IDS OR DASHBOARD_TOKEN header
+- Write endpoints (POST): always require valid initData
 """
 
 import hashlib
@@ -33,11 +39,11 @@ router = APIRouter(prefix="/miniapp/api")
 # ─── Telegram initData validation ────────────────────────────────────────────
 
 
-def _validate_init_data(init_data: str) -> dict | None:
-    """Validate Telegram Mini App initData and return the parsed user data.
+def _validate_init_data_strict(init_data: str) -> dict | None:
+    """Validate Telegram Mini App initData with strict HMAC verification.
 
-    Returns None if validation fails. See:
-    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+    Returns the user dict ONLY if the HMAC signature is valid.
+    Returns None if validation fails (never falls back to unverified data).
     """
     if not init_data:
         return None
@@ -46,10 +52,6 @@ def _validate_init_data(init_data: str) -> dict | None:
         parsed = parse_qs(init_data)
         received_hash = parsed.get("hash", [None])[0]
         if not received_hash:
-            # No hash present — try to parse user field directly (fallback)
-            user_json = parsed.get("user", [None])[0]
-            if user_json:
-                return json.loads(user_json)
             return None
 
         # Build the check string (alphabetically sorted key=value, excluding 'hash')
@@ -65,11 +67,7 @@ def _validate_init_data(init_data: str) -> dict | None:
         computed_hash = hmac.HMAC(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
         if not hmac.compare_digest(computed_hash, received_hash):
-            # Validation failed — but still try to parse user for dev/testing
-            logger.warning("initData HMAC mismatch (may be dev mode)")
-            user_json = parsed.get("user", [None])[0]
-            if user_json:
-                return json.loads(user_json)
+            logger.warning("initData HMAC mismatch — rejecting")
             return None
 
         # Validation passed — parse user JSON
@@ -82,39 +80,52 @@ def _validate_init_data(init_data: str) -> dict | None:
         return None
 
 
-def _get_user_from_header(init_data_header: str | None) -> dict:
-    """Extract user info from the X-Telegram-Init-Data header.
+def _get_verified_user(init_data_header: str | None) -> dict:
+    """Extract verified user from initData. Raises 401 if invalid.
 
-    For development/testing: if initData validation fails, try to parse
-    the user field directly (allows testing without a real Telegram client).
+    This is the STRICT version — only accepts HMAC-verified initData.
+    Use for user-specific and write endpoints.
     """
     if not init_data_header:
-        raise HTTPException(status_code=401, detail="Missing initData")
+        raise HTTPException(status_code=401, detail="Authentication required")
 
-    user = _validate_init_data(init_data_header)
-    if user:
-        return user
+    user = _validate_init_data_strict(init_data_header)
+    if not user or "id" not in user:
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication")
 
-    # Fallback: try parsing user field directly (dev mode / validation bypass)
-    try:
-        parsed = parse_qs(init_data_header)
-        user_json = parsed.get("user", [None])[0]
-        if user_json:
-            return json.loads(user_json)
-    except Exception:
-        pass
+    return user
 
-    # Last resort: try parsing the whole thing as JSON (some clients send it differently)
-    try:
-        data = json.loads(init_data_header)
-        if "id" in data:
-            return data
-        if "user" in data:
-            return data["user"]
-    except Exception:
-        pass
 
-    raise HTTPException(status_code=401, detail="Invalid initData")
+def _get_verified_admin(init_data_header: str | None, dashboard_token: str | None = None) -> dict:
+    """Verify admin access. Accepts either:
+    1. Valid initData from a user in ADMIN_IDS
+    2. Valid DASHBOARD_TOKEN header
+
+    Raises 403 if not admin.
+    """
+    # Method 1: DASHBOARD_TOKEN
+    if dashboard_token and settings.DASHBOARD_TOKEN:
+        if hmac.compare_digest(dashboard_token, settings.DASHBOARD_TOKEN):
+            return {"id": 0, "username": "dashboard", "is_token_auth": True}
+
+    # Method 2: initData from admin user
+    if not init_data_header:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    user = _validate_init_data_strict(init_data_header)
+    if not user or "id" not in user:
+        raise HTTPException(status_code=401, detail="Invalid or expired authentication")
+
+    if user["id"] not in settings.ADMIN_IDS:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    return user
+
+
+# Legacy alias kept for minimal diff in non-security-critical read paths
+def _get_user_from_header(init_data_header: str | None) -> dict:
+    """Alias for _get_verified_user (strict HMAC verification)."""
+    return _get_verified_user(init_data_header)
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -270,8 +281,10 @@ async def join_giveaway(
 
 
 @router.get("/giveaway/{giveaway_id}/participants")
-async def get_participants(giveaway_id: int):
-    """Get participant list (limited to last 50)."""
+async def get_participants(giveaway_id: int, x_telegram_init_data: str | None = Header(None)):
+    """Get participant list (limited to last 50). Requires auth to see usernames."""
+    _get_verified_user(x_telegram_init_data)
+
     async with async_session() as session:
         result = await session.execute(
             select(GiveawayParticipant)
@@ -369,15 +382,22 @@ async def miniapp_active_giveaways():
 
 @router.get("/leaderboard")
 async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
-    """Top users for the leaderboard tab — enriched with all stats."""
+    """Top users for the leaderboard tab.
+
+    - Authenticated: shows usernames, first_names, and personal rank
+    - Unauthenticated: shows only anonymized entries (rank + points/stats, no PII)
+    """
     from bot.models.loyalty import LoyaltyPoints
 
     user = None
     user_id = None
+    is_authenticated = False
     try:
-        user = _get_user_from_header(x_telegram_init_data)
-        user_id = user["id"]
-    except (HTTPException, Exception):
+        user = _validate_init_data_strict(x_telegram_init_data)
+        if user and "id" in user:
+            user_id = user["id"]
+            is_authenticated = True
+    except Exception:
         pass
 
     async with async_session() as session:
@@ -396,7 +416,6 @@ async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
                     my_data = u
                     break
             if my_rank is None:
-                # User not in top 30, find their actual rank
                 rank_result = await session.execute(
                     select(func.count(LoyaltyPoints.id)).where(
                         LoyaltyPoints.total_earned > (
@@ -411,38 +430,42 @@ async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
                 )
                 my_data = user_result.scalar_one_or_none()
 
+    # Build response — only include PII for authenticated users
+    user_list = []
+    for i, u in enumerate(users):
+        entry = {
+            "rank": i + 1,
+            "points": u.total_earned or 0,
+            "wins": u.wins or 0,
+            "referrals": u.referrals_made or 0,
+            "games_joined": (u.giveaways_joined or 0) + (u.contests_joined or 0),
+            "is_me": u.user_id == user_id if user_id else False,
+        }
+        if is_authenticated:
+            entry["username"] = u.username
+            entry["first_name"] = u.first_name
+        else:
+            # Anonymized: show truncated placeholder
+            entry["username"] = None
+            entry["first_name"] = f"User #{i + 1}"
+        user_list.append(entry)
+
     return {
-        "users": [
-            {
-                "rank": i + 1,
-                "user_id": u.user_id,
-                "username": u.username,
-                "first_name": u.first_name,
-                "points": u.total_earned or 0,
-                "wins": u.wins or 0,
-                "referrals": u.referrals_made or 0,
-                "games_joined": (u.giveaways_joined or 0) + (u.contests_joined or 0),
-                "is_me": u.user_id == user_id if user_id else False,
-            }
-            for i, u in enumerate(users)
-        ],
-        "my_rank": my_rank,
+        "users": user_list,
+        "my_rank": my_rank if is_authenticated else None,
         "my_data": {
             "points": my_data.total_earned or 0,
             "wins": my_data.wins or 0,
             "referrals": my_data.referrals_made or 0,
             "games_joined": (my_data.giveaways_joined or 0) + (my_data.contests_joined or 0),
-        } if my_data else None,
+        } if my_data and is_authenticated else None,
     }
 
 
 @router.get("/my-games")
 async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
     """User's participated and created giveaways + referral stats."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        return {"participated": [], "created": [], "referral": {"count": 0, "points": 0}}
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
 
     async with async_session() as session:
@@ -897,24 +920,9 @@ async def miniapp_create_contest(
 async def miniapp_me(x_telegram_init_data: str | None = Header(None)):
     """Get current user info + role (admin or regular).
     
-    Returns guest data if initData is missing/invalid (allows Mini App to load).
+    Requires valid Telegram initData (HMAC-verified).
     """
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        # No valid auth — return guest mode
-        return {
-            "id": 0,
-            "username": None,
-            "first_name": "Guest",
-            "is_admin": False,
-            "points": 0,
-            "total_earned": 0,
-            "created_count": 0,
-            "participated_count": 0,
-            "wins_count": 0,
-        }
-
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
     is_admin = user_id in settings.ADMIN_IDS
 
@@ -953,11 +961,12 @@ async def miniapp_me(x_telegram_init_data: str | None = Header(None)):
 
 
 @router.get("/admin/all-giveaways")
-async def admin_all_giveaways(x_telegram_init_data: str | None = Header(None)):
+async def admin_all_giveaways(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: get all giveaways with management info."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     async with async_session() as session:
         result = await session.execute(
@@ -987,12 +996,11 @@ async def admin_all_giveaways(x_telegram_init_data: str | None = Header(None)):
 async def admin_draw_giveaway(
     giveaway_id: int,
     x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
 ):
     """Admin: draw winners for a giveaway."""
     import random
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     async with async_session() as session:
         result = await session.execute(
@@ -1035,11 +1043,10 @@ async def admin_draw_giveaway(
 async def admin_cancel_giveaway(
     giveaway_id: int,
     x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
 ):
     """Admin: cancel a giveaway."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     async with async_session() as session:
         result = await session.execute(
@@ -1058,11 +1065,12 @@ async def admin_cancel_giveaway(
 
 
 @router.get("/admin/stats")
-async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
+async def admin_full_stats(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: detailed bot statistics."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     from bot.models.contest import Contest, ContestStatus
     from bot.models.referral import Referral
@@ -1111,10 +1119,7 @@ async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
 @router.get("/referral")
 async def miniapp_referral(x_telegram_init_data: str | None = Header(None)):
     """Get user's referral link and stats."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        return {"link": "", "count": 0, "points_earned": 0, "points_per_referral": 20}
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
     username = user.get("username")
 
@@ -1257,10 +1262,7 @@ async def miniapp_vote(contest_id: int, submission_id: int, x_telegram_init_data
 @router.get("/join-filters")
 async def miniapp_join_filters(x_telegram_init_data: str | None = Header(None)):
     """Get join filters managed by the user (admin or creator)."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        return []
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
 
     from bot.handlers.join_request import JoinFilter
@@ -1355,10 +1357,7 @@ async def miniapp_set_join_filter(request: Request, x_telegram_init_data: str | 
 @router.get("/language")
 async def miniapp_get_language(x_telegram_init_data: str | None = Header(None)):
     """Get user's current language."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        return {"language": "uz", "available": ["en", "ru", "uz"]}
+    user = _get_verified_user(x_telegram_init_data)
     from bot.utils.lang import get_user_lang
     lang = await get_user_lang(user["id"])
     return {"language": lang, "available": ["en", "ru", "uz"]}
@@ -1383,11 +1382,7 @@ async def miniapp_set_language(request: Request, x_telegram_init_data: str | Non
 @router.get("/points")
 async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
     """Get user's points detail."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        from bot.utils.loyalty import POINTS_CONFIG
-        return {"points": 0, "total_earned": 0, "total_spent": 0, "giveaways_joined": 0, "contests_joined": 0, "wins": 0, "referrals_made": 0, "config": POINTS_CONFIG, "transactions": []}
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
 
     from bot.models.loyalty import LoyaltyPoints, PointsTransaction
@@ -1426,10 +1421,7 @@ async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
 @router.get("/alerts")
 async def miniapp_alerts(x_telegram_init_data: str | None = Header(None)):
     """Get user's alert subscription status."""
-    try:
-        user = _get_user_from_header(x_telegram_init_data)
-    except HTTPException:
-        return {"subscribed": False}
+    user = _get_verified_user(x_telegram_init_data)
     user_id = user["id"]
 
     from bot.models.notification import AlertSubscription
@@ -1615,17 +1607,10 @@ async def miniapp_notify_participants(
 async def admin_broadcast(
     request: Request,
     x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
 ):
-    """Admin: broadcast a message to users.
-
-    Targets:
-      - all: all users who have ever interacted with the bot (user_settings table)
-      - participants: users who joined at least one giveaway
-      - subscribers: users who subscribed to alerts (AlertSubscription)
-    """
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    """Admin: broadcast a message to users."""
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     body = await request.json()
     text = body.get("text", "").strip()
@@ -1723,11 +1708,12 @@ async def miniapp_submit_feedback(request: Request, x_telegram_init_data: str | 
 
 
 @router.get("/admin/feedback")
-async def admin_get_feedback(x_telegram_init_data: str | None = Header(None)):
+async def admin_get_feedback(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: get all feedback/suggestions/complaints."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     from bot.models.moderation import ContentFlag
 
@@ -1757,11 +1743,12 @@ async def admin_get_feedback(x_telegram_init_data: str | None = Header(None)):
 
 
 @router.get("/admin/users-count")
-async def admin_users_count(x_telegram_init_data: str | None = Header(None)):
+async def admin_users_count(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: get total user count from different sources."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     from bot.models.user_settings import UserSettings
     from bot.models.loyalty import LoyaltyPoints
@@ -1807,11 +1794,12 @@ UPDATE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspat
 
 
 @router.get("/admin/restart-schedule")
-async def admin_get_restart_schedule(x_telegram_init_data: str | None = Header(None)):
+async def admin_get_restart_schedule(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: get current auto-restart schedule from update_config.json."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     try:
         with open(UPDATE_CONFIG_PATH, "r") as f:
@@ -1823,11 +1811,13 @@ async def admin_get_restart_schedule(x_telegram_init_data: str | None = Header(N
 
 
 @router.post("/admin/restart-schedule")
-async def admin_set_restart_schedule(request: Request, x_telegram_init_data: str | None = Header(None)):
+async def admin_set_restart_schedule(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: update auto-restart schedule in update_config.json."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     body = await request.json()
 
@@ -1867,15 +1857,16 @@ RESTART_TRIGGER_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.absp
 
 
 @router.post("/admin/restart-now")
-async def admin_restart_now(x_telegram_init_data: str | None = Header(None)):
+async def admin_restart_now(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: trigger an immediate git pull + restart by writing a trigger file.
 
     The background auto-updater in start_production.sh checks for this file
     every 10 seconds and performs an immediate update cycle when it finds it.
     """
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    user = _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     try:
         with open(RESTART_TRIGGER_PATH, "w") as f:
@@ -1889,11 +1880,12 @@ async def admin_restart_now(x_telegram_init_data: str | None = Header(None)):
 
 
 @router.get("/admin/dbinfo")
-async def admin_dbinfo(x_telegram_init_data: str | None = Header(None)):
+async def admin_dbinfo(
+    x_telegram_init_data: str | None = Header(None),
+    x_dashboard_token: str | None = Header(None),
+):
     """Admin: get database info (table sizes, total rows)."""
-    user = _get_user_from_header(x_telegram_init_data)
-    if user["id"] not in settings.ADMIN_IDS:
-        raise HTTPException(status_code=403, detail="Admin only")
+    _get_verified_admin(x_telegram_init_data, x_dashboard_token)
 
     from sqlalchemy import text as sql_text
 

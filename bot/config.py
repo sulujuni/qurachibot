@@ -18,8 +18,11 @@ class Settings:
     ADMIN_IDS: list = field(default_factory=lambda: [
         int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()
     ])
-    WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
+    WEB_HOST: str = os.getenv("WEB_HOST", "127.0.0.1")
     WEB_PORT: int = int(os.getenv("WEB_PORT", "8090"))
+    # Secret token for accessing the web dashboard and /admin/* API endpoints.
+    # Generate a random string: python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+    DASHBOARD_TOKEN: str = os.getenv("DASHBOARD_TOKEN", "")
     # Public HTTPS URL of the web dashboard. Set this to enable the "Dashboard"
     # button in the Telegram chat menu. Must be HTTPS for Telegram Web Apps.
     # Example: https://bot.yourdomain.com or your Cloudflare tunnel URL.

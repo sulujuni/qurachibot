@@ -1,15 +1,17 @@
 """FastAPI web dashboard for the giveaway bot."""
 
+import hmac
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
+from bot.config import settings
 from bot.models.database import async_session, engine, init_db
 from bot.models.giveaway import Giveaway, GiveawayStatus, GiveawayParticipant, GiveawayWinner
 from bot.models.contest import Contest, ContestStatus, ContestSubmission, ContestVote
@@ -25,6 +27,17 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 # Register Mini App API routes
 from web.miniapp_api import router as miniapp_router
 app.include_router(miniapp_router)
+
+
+def _verify_dashboard_token(request: Request) -> None:
+    """Check DASHBOARD_TOKEN from query param or header. Raises 401 if invalid."""
+    if not settings.DASHBOARD_TOKEN:
+        raise HTTPException(status_code=403, detail="Dashboard not configured (set DASHBOARD_TOKEN)")
+    token = request.headers.get("x-dashboard-token")
+    if not token:
+        token = request.query_params.get("token")
+    if not token or not hmac.compare_digest(token, settings.DASHBOARD_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing dashboard token")
 
 
 @app.on_event("startup")
@@ -46,7 +59,8 @@ async def miniapp_main(request: Request, tab: str = "home"):
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    """Main dashboard page with stats."""
+    """Main dashboard page with stats. Requires DASHBOARD_TOKEN."""
+    _verify_dashboard_token(request)
     async with async_session() as session:
         # Giveaway stats
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar()
@@ -124,8 +138,9 @@ async def dashboard(request: Request):
 
 
 @app.get("/api/stats")
-async def api_stats():
-    """JSON API for stats (for live updates)."""
+async def api_stats(request: Request):
+    """JSON API for stats (for live updates). Requires DASHBOARD_TOKEN."""
+    _verify_dashboard_token(request)
     async with async_session() as session:
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar()
         gw_active = (await session.execute(
@@ -148,8 +163,9 @@ async def api_stats():
 
 
 @app.get("/api/leaderboard")
-async def api_leaderboard():
-    """JSON API for leaderboard."""
+async def api_leaderboard(request: Request):
+    """JSON API for leaderboard. Requires DASHBOARD_TOKEN."""
+    _verify_dashboard_token(request)
     async with async_session() as session:
         result = await session.execute(
             select(LoyaltyPoints).order_by(LoyaltyPoints.total_earned.desc()).limit(20)
@@ -170,8 +186,9 @@ async def api_leaderboard():
 
 
 @app.get("/api/giveaways")
-async def api_giveaways():
-    """JSON API for giveaways list."""
+async def api_giveaways(request: Request):
+    """JSON API for giveaways list. Requires DASHBOARD_TOKEN."""
+    _verify_dashboard_token(request)
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway).options(selectinload(Giveaway.participants))
@@ -195,8 +212,9 @@ async def api_giveaways():
 
 
 @app.get("/api/contests")
-async def api_contests():
-    """JSON API for contests list."""
+async def api_contests(request: Request):
+    """JSON API for contests list. Requires DASHBOARD_TOKEN."""
+    _verify_dashboard_token(request)
     async with async_session() as session:
         result = await session.execute(
             select(Contest).options(selectinload(Contest.submissions))

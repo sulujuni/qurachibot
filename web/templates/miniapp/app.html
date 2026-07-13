@@ -1025,9 +1025,12 @@ async function api(path, method='GET', body=null) {
 }
 
 async function initApp() {
+    // Try to authenticate — if initData is valid, we get user info
+    // If not (e.g. opened from browser), we run in public/read-only mode
     try {
-        userData = await api('/me');
-        if (userData && userData.id) {
+        const meResp = await api('/me');
+        if (meResp && meResp.id && meResp.id !== 0) {
+            userData = meResp;
             isAdmin = userData.is_admin;
         } else {
             userData = null;
@@ -1038,11 +1041,13 @@ async function initApp() {
         isAdmin = false;
     }
 
-    // Load user's language preference
-    try {
-        const langData = await api('/language');
-        if (langData && langData.language) currentLang = langData.language;
-    } catch(e) {}
+    // Load user's language preference (only if authenticated)
+    if (userData) {
+        try {
+            const langData = await api('/language');
+            if (langData && langData.language) currentLang = langData.language;
+        } catch(e) {}
+    }
 
     // Update nav labels to match language
     updateNavLabels();
@@ -1341,6 +1346,10 @@ async function joinGiveawayDetail(id) {
 // ─── MY GAMES TAB ──────────────────────────────────────────────
 async function renderGames() {
     const el = document.getElementById('content');
+    if (!userData) {
+        el.innerHTML = `<div class="card">${emptyState('user', currentLang === 'uz' ? "Bu sahifani ko'rish uchun Telegram orqali oching" : currentLang === 'ru' ? 'Откройте через Telegram для просмотра' : 'Open from Telegram to view this page')}</div>`;
+        return;
+    }
     el.innerHTML = LOAD;
     const data = await api('/my-games') || {};
     let html = '';
@@ -2197,6 +2206,10 @@ async function restartNow() {
 // ─── PROFILE TAB ───────────────────────────────────────────────
 async function renderProfile() {
     const el = document.getElementById('content');
+    if (!userData) {
+        el.innerHTML = `<div class="card">${emptyState('user', currentLang === 'uz' ? "Profil uchun Telegram orqali oching" : currentLang === 'ru' ? 'Откройте через Telegram для профиля' : 'Open from Telegram to view profile')}</div>`;
+        return;
+    }
     el.innerHTML = LOAD;
 
     let points = {points:0, total_earned:0, config:{}, transactions:[]};
