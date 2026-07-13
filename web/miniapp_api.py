@@ -377,7 +377,7 @@ async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
     try:
         user = _get_user_from_header(x_telegram_init_data)
         user_id = user["id"]
-    except Exception:
+    except (HTTPException, Exception):
         pass
 
     async with async_session() as session:
@@ -439,7 +439,10 @@ async def miniapp_leaderboard(x_telegram_init_data: str | None = Header(None)):
 @router.get("/my-games")
 async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
     """User's participated and created giveaways + referral stats."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        return {"participated": [], "created": [], "referral": {"count": 0, "points": 0}}
     user_id = user["id"]
 
     async with async_session() as session:
@@ -892,10 +895,27 @@ async def miniapp_create_contest(
 
 @router.get("/me")
 async def miniapp_me(x_telegram_init_data: str | None = Header(None)):
-    """Get current user info + role (admin or regular)."""
-    user = _get_user_from_header(x_telegram_init_data)
-    user_id = user["id"]
+    """Get current user info + role (admin or regular).
+    
+    Returns guest data if initData is missing/invalid (allows Mini App to load).
+    """
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        # No valid auth — return guest mode
+        return {
+            "id": 0,
+            "username": None,
+            "first_name": "Guest",
+            "is_admin": False,
+            "points": 0,
+            "total_earned": 0,
+            "created_count": 0,
+            "participated_count": 0,
+            "wins_count": 0,
+        }
 
+    user_id = user["id"]
     is_admin = user_id in settings.ADMIN_IDS
 
     # Get user's loyalty stats
@@ -1091,7 +1111,10 @@ async def admin_full_stats(x_telegram_init_data: str | None = Header(None)):
 @router.get("/referral")
 async def miniapp_referral(x_telegram_init_data: str | None = Header(None)):
     """Get user's referral link and stats."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        return {"link": "", "count": 0, "points_earned": 0, "points_per_referral": 20}
     user_id = user["id"]
     username = user.get("username")
 
@@ -1234,7 +1257,10 @@ async def miniapp_vote(contest_id: int, submission_id: int, x_telegram_init_data
 @router.get("/join-filters")
 async def miniapp_join_filters(x_telegram_init_data: str | None = Header(None)):
     """Get join filters managed by the user (admin or creator)."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        return []
     user_id = user["id"]
 
     from bot.handlers.join_request import JoinFilter
@@ -1329,7 +1355,10 @@ async def miniapp_set_join_filter(request: Request, x_telegram_init_data: str | 
 @router.get("/language")
 async def miniapp_get_language(x_telegram_init_data: str | None = Header(None)):
     """Get user's current language."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        return {"language": "uz", "available": ["en", "ru", "uz"]}
     from bot.utils.lang import get_user_lang
     lang = await get_user_lang(user["id"])
     return {"language": lang, "available": ["en", "ru", "uz"]}
@@ -1354,7 +1383,11 @@ async def miniapp_set_language(request: Request, x_telegram_init_data: str | Non
 @router.get("/points")
 async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
     """Get user's points detail."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        from bot.utils.loyalty import POINTS_CONFIG
+        return {"points": 0, "total_earned": 0, "total_spent": 0, "giveaways_joined": 0, "contests_joined": 0, "wins": 0, "referrals_made": 0, "config": POINTS_CONFIG, "transactions": []}
     user_id = user["id"]
 
     from bot.models.loyalty import LoyaltyPoints, PointsTransaction
@@ -1393,7 +1426,10 @@ async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
 @router.get("/alerts")
 async def miniapp_alerts(x_telegram_init_data: str | None = Header(None)):
     """Get user's alert subscription status."""
-    user = _get_user_from_header(x_telegram_init_data)
+    try:
+        user = _get_user_from_header(x_telegram_init_data)
+    except HTTPException:
+        return {"subscribed": False}
     user_id = user["id"]
 
     from bot.models.notification import AlertSubscription
