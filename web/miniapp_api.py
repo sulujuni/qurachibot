@@ -307,7 +307,7 @@ async def get_participants(giveaway_id: int):
 
 @router.get("/stats")
 async def miniapp_stats():
-    """Global stats for the Mini App home tab."""
+    """Global stats for the Mini App home tab (no auth required)."""
     async with async_session() as session:
         gw_total = (await session.execute(select(func.count(Giveaway.id)))).scalar() or 0
         gw_active = (await session.execute(
@@ -333,7 +333,7 @@ async def miniapp_stats():
 
 @router.get("/active-giveaways")
 async def miniapp_active_giveaways():
-    """List active giveaways for the home tab."""
+    """List active giveaways for the home tab (no auth required)."""
     async with async_session() as session:
         result = await session.execute(
             select(Giveaway)

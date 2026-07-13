@@ -1012,6 +1012,10 @@ async function api(path, method='GET', body=null) {
             console.warn('API 401 — initData may be invalid. Path:', path);
             return {};
         }
+        if (!r.ok) {
+            console.warn('API error status:', r.status, 'Path:', path);
+            return {};
+        }
         const data = await r.json();
         return data;
     } catch(e) {
@@ -1023,15 +1027,21 @@ async function api(path, method='GET', body=null) {
 async function initApp() {
     try {
         userData = await api('/me');
-        isAdmin = userData.is_admin;
+        if (userData && userData.id) {
+            isAdmin = userData.is_admin;
+        } else {
+            userData = null;
+            isAdmin = false;
+        }
     } catch(e) {
+        userData = null;
         isAdmin = false;
     }
 
     // Load user's language preference
     try {
         const langData = await api('/language');
-        if (langData.language) currentLang = langData.language;
+        if (langData && langData.language) currentLang = langData.language;
     } catch(e) {}
 
     // Update nav labels to match language
@@ -1077,9 +1087,14 @@ function switchTab(tab) {
     const el = document.getElementById('content');
     // Smooth cross-fade transition
     el.classList.add('tab-exit');
-    setTimeout(() => {
+    setTimeout(async () => {
         const loaders = { home: renderHome, games: renderGames, leaders: renderLeaders, create: renderCreate, admin: renderAdmin, profile: renderProfile };
-        if (loaders[tab]) loaders[tab]();
+        try {
+            if (loaders[tab]) await loaders[tab]();
+        } catch(e) {
+            console.error('Tab render error:', tab, e);
+            el.innerHTML = `<div class="card"><div class="empty-state"><p style="color:var(--red);">⚠️ Error loading tab<br><small style="color:var(--text-dim);">${e.message || e}</small></p></div></div>`;
+        }
         el.classList.remove('tab-exit');
     }, 100);
 }
@@ -1117,7 +1132,17 @@ function timeLeft(iso) {
 async function renderHome() {
     const el = document.getElementById('content');
     el.innerHTML = LOAD;
-    const [stats, games, contests] = await Promise.all([api('/stats'), api('/active-giveaways'), api('/active-contests')]);
+    let stats = {}, games = [], contests = [];
+    try {
+        const [s, g, c] = await Promise.all([api('/stats'), api('/active-giveaways'), api('/active-contests')]);
+        stats = s || {};
+        games = Array.isArray(g) ? g : [];
+        contests = Array.isArray(c) ? c : [];
+    } catch(e) {
+        console.error('renderHome error:', e);
+        el.innerHTML = `<div class="card"><div class="empty-state"><p>⚠️ ${e.message || 'API error'}</p></div></div>`;
+        return;
+    }
 
     let html = '';
 
@@ -1317,7 +1342,7 @@ async function joinGiveawayDetail(id) {
 async function renderGames() {
     const el = document.getElementById('content');
     el.innerHTML = LOAD;
-    const data = await api('/my-games');
+    const data = await api('/my-games') || {};
     let html = '';
     if (data.referral) {
         html += `<div class="card"><div class="card-title"><span class="ci">${ic('users')}</span>${t('referral_title')}</div>
@@ -1987,10 +2012,19 @@ async function renderAdmin() {
     const el = document.getElementById('content');
     el.innerHTML = LOAD;
 
-    const [stats, giveaways] = await Promise.all([
-        api('/admin/stats'),
-        api('/admin/all-giveaways'),
-    ]);
+    let stats = {}, giveaways = [];
+    try {
+        const [s, g] = await Promise.all([
+            api('/admin/stats'),
+            api('/admin/all-giveaways'),
+        ]);
+        stats = s || {};
+        giveaways = Array.isArray(g) ? g : [];
+    } catch(e) {
+        console.error('renderAdmin error:', e);
+        el.innerHTML = `<div class="card"><div class="empty-state"><p>⚠️ Admin API error: ${e.message || '?'}</p></div></div>`;
+        return;
+    }
 
     let html = `
     <div class="card">
@@ -2097,10 +2131,10 @@ async function renderAdmin() {
     </div>`;
 
     // Feedback viewer (admin)
-    const feedbackData = await api('/admin/feedback');
+    const feedbackData = await api('/admin/feedback') || [];
     html += `<div class="card">
         <div class="card-title"><span class="ci">${ic('edit')}</span>${t('feedback_title')}</div>`;
-    if (feedbackData.length) {
+    if (Array.isArray(feedbackData) && feedbackData.length) {
         feedbackData.slice(0, 20).forEach(fb => {
             const typeIcon = {suggestion:ic('bulb',14), complaint:ic('message',14), bug:ic('ban',14)}[fb.type] || ic('edit',14);
             html += `<div style="padding:11px 0;border-bottom:1px solid var(--border);font-size:12.5px;">
