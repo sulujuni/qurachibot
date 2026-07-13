@@ -953,6 +953,10 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
     IMPORTANT: This handler only processes messages when user_data has 
     'awaiting_captcha' = True. Otherwise it does NOTHING (passes through).
     """
+    # Guard: if user_data is None (e.g. channel post), skip
+    if context.user_data is None:
+        return
+
     # Join filter: check if awaiting channel (forwarded message or text)
     if context.user_data.get("jf_awaiting_channel"):
         logger.info("JF: Received message while awaiting channel. forward_from_chat=%s, forward_origin=%s, text=%s",
