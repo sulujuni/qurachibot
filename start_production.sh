@@ -29,7 +29,10 @@ PID_FILE=".prod_pids"
 UPDATER_PID_FILE=".updater_pid"
 LOG_FILE="auto_update.log"
 CONFIG_FILE="update_config.json"
-GIT_BRANCH="feature/forced-sub-referral-antiabuse"
+# Branch the auto-updater pulls from. Defaults to whatever branch is currently
+# checked out (so it never goes stale after a branch switch); override by
+# exporting GIT_BRANCH before launching.
+GIT_BRANCH="${GIT_BRANCH:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)}"
 
 # ─── Stop mode ─────────────────────────────────────────────
 if [ "$1" = "stop" ]; then
