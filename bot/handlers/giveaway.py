@@ -802,7 +802,7 @@ async def _show_edit_summary(bot, chat_id, giveaway, lang):
     status_labels = {"draft": "📝 Draft", "queued": "⏳ Navbatda", "active": "🟢 Faol", "completed": "✅ Tugagan", "cancelled": "❌ Bekor"}
     summary = (
         f"📋 <b>{giveaway.title}</b>\n\n"
-        f"📊 Holat: {status_labels.get(giveaway.status.value, giveaway.status.value)}\n"
+        f"📊 Holat: {status_labels.get(giveaway.status, giveaway.status)}\n"
         f"📢 Kanal: {ch_title or '—'}\n"
         f"🏆 G'oliblar: {giveaway.winner_count}\n"
         f"⏳ Boshlanish: {start_txt}\n"
@@ -1029,7 +1029,7 @@ async def _show_my_giveaway_page(bot, chat_id, user_id, page, lang, edit_message
 
     text = (
         f"{emoji} <b>{gw.title}</b>\n\n"
-        f"📊 {gw.status.value} | 👤 {p_count} ishtirokchi\n"
+        f"📊 {gw.status} | 👤 {p_count} ishtirokchi\n"
         f"🏆 G'oliblar: {gw.winner_count}\n"
     )
     if start_str:
