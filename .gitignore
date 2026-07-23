@@ -14,3 +14,9 @@ env/
 dist/
 build/
 *.egg-info/
+
+# Runtime artifacts
+*.log
+.prod_pids
+.updater_pid
+*.deb

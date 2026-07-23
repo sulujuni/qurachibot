@@ -55,18 +55,23 @@ def _format_name(entry) -> str:
 
 
 def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMarkup:
-    """Build share/forward buttons shown to creator after game creation."""
+    """Build the share button shown to the creator after game creation.
+
+    Comment giveaways can't be shared via inline mode: the bot never learns an
+    inline-sent message's message_id, so replies to it couldn't be matched to
+    the giveaway. The post is already in the group where it was created, so we
+    only offer a copy link that shows the game info.
+    """
     from bot.config import settings
     bot_username = settings.BOT_USERNAME or "qurachibot"
     deep_link = f"https://t.me/{bot_username}?start={game_type}_{game_id}"
     labels = {
-        "uz": ("📢 Kanalga/Guruhga yuborish", "🔗 Havolani nusxalash"),
-        "ru": ("📢 Отправить в канал/группу", "🔗 Скопировать ссылку"),
-        "en": ("📢 Send to channel/group", "🔗 Copy link"),
+        "uz": "🔗 Havolani nusxalash",
+        "ru": "🔗 Скопировать ссылку",
+        "en": "🔗 Copy link",
     }
-    share_label, link_label = labels.get(lang, labels["uz"])
+    link_label = labels.get(lang, labels["uz"])
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(share_label, switch_inline_query_chosen_chat=f"{game_type}_{game_id}")],
         [InlineKeyboardButton(link_label, url=deep_link)],
     ])
 

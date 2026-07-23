@@ -59,78 +59,98 @@ async def publish_queued_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
         queued = result.scalars().all()
 
     for gw in queued:
-        channel_id = gw.channel_id or gw.chat_id
         lang = await get_user_lang(gw.creator_id)
 
-        # Build join button
-        from bot.config import settings
-        from telegram import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-        join_label = f"🎮 {get_text('gw_join_button', lang=lang)} (0)"
-        web_url = settings.WEB_URL
-        if web_url:
-            url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={gw.id}"
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, web_app=WebAppInfo(url=url))]])
-        else:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton(join_label, callback_data=f"join_gw_{gw.id}")]])
+        # Already past its end time (e.g. bot was down) — cancel instead of
+        # publishing a giveaway that would immediately expire.
+        if gw.ends_at and gw.ends_at <= now:
+            async with async_session() as session:
+                g = (await session.execute(select(Giveaway).where(Giveaway.id == gw.id))).scalar_one()
+                g.status = "cancelled"
+                await session.commit()
+            try:
+                await context.bot.send_message(
+                    gw.creator_id,
+                    f"❌ <b>{gw.title}</b> — joylash vaqti o'tkazib yuborildi (tugash vaqti ham o'tgan), bekor qilindi.",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+            continue
 
-        # Send the post to the channel
-        try:
-            if gw.post_file_id and gw.post_media_type:
-                mt = gw.post_media_type
-                caption = gw.post_text or ""
-                if mt == "photo":
-                    msg = await context.bot.send_photo(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-                elif mt == "video":
-                    msg = await context.bot.send_video(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-                elif mt == "animation":
-                    msg = await context.bot.send_animation(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-                else:
-                    msg = await context.bot.send_document(channel_id, gw.post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
-            else:
-                msg = await context.bot.send_message(channel_id, gw.post_text or gw.title, parse_mode="HTML", reply_markup=kb)
+        # Publish to every target channel (multi-channel support)
+        from telegram.error import BadRequest, Forbidden, InvalidToken
+        from bot.handlers.giveaway import publish_giveaway_to_channels
 
-            # Update status to ACTIVE
+        posts, errors = await publish_giveaway_to_channels(context.bot, gw, lang)
+
+        if posts:
             async with async_session() as session:
                 result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
                 g = result.scalar_one()
                 g.status = "active"
-                g.published_at = now
-                g.message_id = msg.message_id
-                if not g.channel_id:
-                    g.channel_id = channel_id
                 await session.commit()
 
-            # Notify creator
+            # Notify creator (mention partial failures, if any)
             try:
                 published_msg = {
-                    "uz": f"✅ <b>{gw.title}</b> kanalga muvaffaqiyatli joylandi!",
-                    "ru": f"✅ <b>{gw.title}</b> опубликован в канале!",
-                    "en": f"✅ <b>{gw.title}</b> published to channel!",
+                    "uz": f"✅ <b>{gw.title}</b> {len(posts)} ta kanalga joylandi!",
+                    "ru": f"✅ <b>{gw.title}</b> опубликован в {len(posts)} канал(ах)!",
+                    "en": f"✅ <b>{gw.title}</b> published to {len(posts)} channel(s)!",
                 }
-                await context.bot.send_message(gw.creator_id, published_msg.get(lang, published_msg["uz"]), parse_mode="HTML")
+                text = published_msg.get(lang, published_msg["uz"])
+                if errors:
+                    text += "\n⚠️ " + "; ".join(f"{ch}: {str(e)[:60]}" for ch, e in errors)
+                await context.bot.send_message(gw.creator_id, text, parse_mode="HTML")
             except Exception:
                 pass
+            logger.info(f"Published queued giveaway {gw.id} to {len(posts)} channel(s)")
+            continue
 
-            logger.info(f"Published queued giveaway {gw.id} to channel {channel_id}")
+        # Nothing published. Transient network problems → leave QUEUED to retry.
+        if errors and not any(isinstance(e, (BadRequest, Forbidden, InvalidToken)) for _, e in errors):
+            continue
 
+        # Permanent error (kicked from channel, bad content, …) — notify + cancel
+        err_txt = "; ".join(f"{ch}: {str(e)[:60]}" for ch, e in errors) if errors else "kanal topilmadi"
+        try:
+            fail_msg = {
+                "uz": f"❌ <b>{gw.title}</b> kanalga joylab bo'lmadi: {err_txt}",
+                "ru": f"❌ Не удалось опубликовать <b>{gw.title}</b>: {err_txt}",
+                "en": f"❌ Failed to publish <b>{gw.title}</b>: {err_txt}",
+            }
+            await context.bot.send_message(gw.creator_id, fail_msg.get(lang, fail_msg["uz"]), parse_mode="HTML")
+        except Exception:
+            pass
+        async with async_session() as session:
+            result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
+            g = result.scalar_one()
+            g.status = "cancelled"
+            await session.commit()
+
+
+async def refresh_giveaway_counters(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Refresh join-button counters on every active giveaway post (once/min).
+
+    Counters are intentionally NOT updated on each join — a popular giveaway
+    could edit its channel posts dozens of times a second and hit Telegram's
+    message-edit rate limit. Instead this job batches the update: it runs once
+    a minute and (thanks to the dirty-check inside update_all_post_counters)
+    only re-edits posts whose participant count actually changed.
+    """
+    from bot.handlers.giveaway import update_all_post_counters
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Giveaway.id).where(Giveaway.status == "active")
+        )
+        active_ids = result.scalars().all()
+
+    for gid in active_ids:
+        try:
+            await update_all_post_counters(context.bot, gid)
         except Exception as e:
-            logger.error(f"Failed to publish queued giveaway {gw.id}: {e}")
-            # Notify creator about failure
-            try:
-                fail_msg = {
-                    "uz": f"❌ <b>{gw.title}</b> kanalga joylab bo'lmadi: {str(e)[:100]}",
-                    "ru": f"❌ Не удалось опубликовать <b>{gw.title}</b>: {str(e)[:100]}",
-                    "en": f"❌ Failed to publish <b>{gw.title}</b>: {str(e)[:100]}",
-                }
-                await context.bot.send_message(gw.creator_id, fail_msg.get(lang, fail_msg["uz"]), parse_mode="HTML")
-            except Exception:
-                pass
-            # Mark as cancelled so it doesn't retry forever
-            async with async_session() as session:
-                result = await session.execute(select(Giveaway).where(Giveaway.id == gw.id))
-                g = result.scalar_one()
-                g.status = "cancelled"
-                await session.commit()
+            logger.debug("Counter refresh failed for giveaway %s: %s", gid, e)
 
 
 async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -156,17 +176,28 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
                 giveaway.status = "completed"
                 giveaway.drawn_at = now
                 await session.commit()
-                # Announce "no winners" in channel
-                announce_channel = giveaway.channel_id or giveaway.chat_id
-                try:
-                    await context.bot.send_message(
-                        announce_channel,
-                        f"❌ <b>{giveaway.title}</b>\n\n"
-                        f"Ishtirokchilar bo'lmaganligi sababli g'olib aniqlanmadi.",
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    pass
+                # Announce "no winners" in every channel + remove join buttons
+                from bot.handlers.giveaway import close_published_post, get_published_posts
+                no_winner_text = (
+                    f"❌ <b>{giveaway.title}</b>\n\n"
+                    f"Ishtirokchilar bo'lmaganligi sababli g'olib aniqlanmadi."
+                )
+                posts = await get_published_posts(giveaway)
+                if posts:
+                    for p_chat, p_msg in posts:
+                        try:
+                            await context.bot.send_message(
+                                p_chat, no_winner_text, parse_mode="HTML",
+                                reply_to_message_id=p_msg,
+                            )
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        await context.bot.send_message(giveaway.chat_id, no_winner_text, parse_mode="HTML")
+                    except Exception:
+                        pass
+                await close_published_post(context.bot, giveaway)
                 # Notify creator
                 try:
                     await context.bot.send_message(
@@ -178,9 +209,11 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
                     pass
                 continue
 
-            # Draw winners
-            winner_count = min(giveaway.winner_count, len(giveaway.participants))
-            winners = random.sample(list(giveaway.participants), winner_count)
+            # Draw winners (weighted by boost-channel subscriptions if set)
+            from bot.handlers.giveaway import _weighted_draw
+            winners = await _weighted_draw(
+                giveaway.participants, giveaway.winner_count, giveaway.boost_channels, context.bot,
+            )
 
             for winner in winners:
                 gw_winner = GiveawayWinner(
@@ -195,23 +228,12 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
             giveaway.drawn_at = now
             await session.commit()
 
-            # Announce winners publicly
+            # Announce in channel (reply to post), close the post, DM winners
+            from bot.handlers.giveaway import announce_results
             winners_text = "\n".join(
                 _mention_winner(w, i+1) for i, w in enumerate(winners)
             )
-            # Announce in the channel where post was published
-            announce_channel = giveaway.channel_id or giveaway.chat_id
-            try:
-                await context.bot.send_message(
-                    announce_channel,
-                    f"🎊 <b>{giveaway.title}</b>\n\n"
-                    f"👤 {get_text('gw_participants', lang='uz')}: {len(giveaway.participants)}\n\n"
-                    f"<b>🏆 G'oliblar:</b>\n{winners_text}\n\n"
-                    f"Tabriklaymiz! 🎉",
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                logger.error(f"Failed to announce giveaway {giveaway.id} in channel: {e}")
+            await announce_results(context.bot, giveaway, winners, len(giveaway.participants))
 
             # Also notify the creator via DM
             try:
@@ -228,21 +250,6 @@ async def check_expired_giveaways(context: ContextTypes.DEFAULT_TYPE) -> None:
                 )
             except Exception:
                 pass
-
-            # DM each winner
-            for winner in winners:
-                try:
-                    w_lang = await get_user_lang(winner.user_id)
-                    win_msg = {
-                        "uz": f"🎉 <b>Tabriklaymiz!</b>\n\n<b>{giveaway.title}</b> yutuqli o'yinida g'olib bo'ldingiz!\n🎁 {giveaway.prize or ''}\n\nTashkilotchi bilan bog'laning!",
-                        "ru": f"🎉 <b>Поздравляем!</b>\n\nВы победили в розыгрыше <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}\n\nСвяжитесь с организатором!",
-                        "en": f"🎉 <b>Congratulations!</b>\n\nYou won: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}\n\nContact the organizer to claim!",
-                    }
-                    await context.bot.send_message(
-                        winner.user_id, win_msg.get(w_lang, win_msg["uz"]), parse_mode="HTML",
-                    )
-                except Exception:
-                    pass  # User may have blocked the bot
 
     logger.info(f"Checked expired giveaways. Processed: {len(expired_giveaways)}")
 
@@ -406,28 +413,48 @@ async def send_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             if result.scalar_one_or_none():
                 continue
 
-            try:
-                await context.bot.send_message(
-                    gw.chat_id,
-                    f"⏰ <b>ENDING SOON: {gw.title}</b>\n\n"
-                    f"This giveaway ends in less than 1 hour!\n"
-                    f"👤 Current participants: {len(gw.participants)}\n"
-                    f"🎁 Prize: {gw.prize}\n\n"
-                    f"Last chance to join! 🏃",
-                    parse_mode="HTML",
+            # Remind in every channel where the post lives (reply to each post),
+            # falling back to the creation chat for unpublished giveaways.
+            # Owner's reminder_template wins over the built-in text.
+            from bot.handlers.giveaway import get_published_posts, render_owner_template
+            creator_lang = await get_user_lang(gw.creator_id)
+            if gw.reminder_template and gw.reminder_template.strip():
+                reminder_text = render_owner_template(
+                    gw.reminder_template,
+                    title=gw.title, count=len(gw.participants), prize=gw.prize,
                 )
+            else:
+                reminder_msgs = {
+                    "uz": f"⏰ <b>Tez orada tugaydi: {gw.title}</b>\n\nBu o'yin 1 soatdan kamroq vaqtda tugaydi!\n👤 Ishtirokchilar: {len(gw.participants)}\n\nOxirgi imkoniyat! 🏃",
+                    "ru": f"⏰ <b>Скоро завершится: {gw.title}</b>\n\nРозыгрыш закончится менее чем через 1 час!\n👤 Участников: {len(gw.participants)}\n\nПоследний шанс! 🏃",
+                    "en": f"⏰ <b>ENDING SOON: {gw.title}</b>\n\nThis giveaway ends in less than 1 hour!\n👤 Participants: {len(gw.participants)}\n\nLast chance to join! 🏃",
+                }
+                reminder_text = reminder_msgs.get(creator_lang, reminder_msgs["uz"])
+
+            posts = await get_published_posts(gw)
+            targets = posts if posts else [(gw.chat_id, None)]
+            sent_any = False
+            for t_chat, t_msg in targets:
+                kwargs = {"reply_to_message_id": t_msg} if t_msg else {}
+                try:
+                    await context.bot.send_message(
+                        t_chat, reminder_text, parse_mode="HTML", **kwargs,
+                    )
+                    sent_any = True
+                except Exception as e:
+                    logger.error(f"Failed to send reminder for giveaway {gw.id} to {t_chat}: {e}")
+
+            if sent_any:
                 # Mark as sent
                 reminder = ScheduledReminder(
                     event_type="giveaway",
                     event_id=gw.id,
-                    chat_id=gw.chat_id,
+                    chat_id=targets[0][0],
                     remind_at=now,
                     sent=True,
                 )
                 session.add(reminder)
                 await session.commit()
-            except Exception as e:
-                logger.error(f"Failed to send reminder for giveaway {gw.id}: {e}")
 
 
 async def send_new_event_alerts(context: ContextTypes.DEFAULT_TYPE) -> None:

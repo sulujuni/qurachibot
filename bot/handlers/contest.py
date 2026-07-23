@@ -168,8 +168,12 @@ async def contest_winners_selected(update: Update, context: ContextTypes.DEFAULT
         "en": ("📢 Send to channel/group", "🔗 Copy link"),
     }
     sl, ll = share_labels.get(lang, share_labels["uz"])
+    from telegram import SwitchInlineQueryChosenChat
     share_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(sl, switch_inline_query_chosen_chat=f"ct_{contest.id}")],
+        [InlineKeyboardButton(sl, switch_inline_query_chosen_chat=SwitchInlineQueryChosenChat(
+            query=f"ct_{contest.id}",
+            allow_user_chats=True, allow_group_chats=True, allow_channel_chats=True,
+        ))],
         [InlineKeyboardButton(ll, url=deep_link)],
     ])
     share_texts = {
@@ -563,7 +567,15 @@ async def my_contests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 def get_contest_handlers() -> list:
     """Return all contest-related handlers."""
     create_conv = ConversationHandler(
-        entry_points=[CommandHandler("newcontest", new_contest_start)],
+        entry_points=[
+            CommandHandler("newcontest", new_contest_start),
+            # Reply-menu button must be an entry point too — calling the entry
+            # function from a plain MessageHandler never starts the conversation.
+            MessageHandler(
+                filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"),
+                new_contest_start,
+            ),
+        ],
         states={
             CT_POST: [
                 MessageHandler(

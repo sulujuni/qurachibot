@@ -25,6 +25,7 @@ from bot.i18n import get_text
 from bot.models import (
     Giveaway,
     GiveawayParticipant,
+    GiveawayPost,
     GiveawayStatus,
     GiveawayWinner,
     async_session,
@@ -32,6 +33,7 @@ from bot.models import (
 from bot.models.user_channel import UserChannel
 from bot.utils.lang import get_user_lang, t
 from bot.utils.referral import verify_pending_referrals
+from bot.utils.timeutil import fmt_local, parse_user_datetime
 from bot.utils.subscription import (
     build_subscription_keyboard,
     get_unsubscribed,
@@ -45,19 +47,144 @@ logger = logging.getLogger(__name__)
 POST, PREVIEW, BUTTON_LABEL, CHANNEL, WINNERS, START_TIME, END_TIME, SUB_CHANNELS, BOOST_CHANNELS = range(9)
 
 
-def _join_button(giveaway_id: int, participant_count: int, lang: str, custom_label: str | None = None) -> InlineKeyboardMarkup:
-    """Build the 'Join' button for a giveaway announcement."""
+def _join_button(giveaway_id: int, participant_count: int, lang: str, custom_label: str | None = None, use_webapp: bool = False) -> InlineKeyboardMarkup:
+    """Build the 'Join' button for a giveaway announcement.
+
+    Channel/group posts can't use web_app inline buttons (Button_type_invalid
+    outside private chats). Preference order:
+    1. use_webapp=True (private chat) → web_app button
+    2. MINIAPP_SHORT_NAME configured → direct-link Mini App URL button, which
+       opens the animated join screen from any chat, including channels
+    3. plain callback button (join happens in place)
+    """
     if custom_label:
         label = f"{custom_label} ({participant_count})"
     else:
         label = f"🎮 {get_text('gw_join_button', lang=lang)} ({participant_count})"
     web_url = settings.WEB_URL
-    if web_url:
+    if use_webapp and web_url:
         url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={giveaway_id}"
         button = InlineKeyboardButton(label, web_app=WebAppInfo(url=url))
+    elif settings.MINIAPP_SHORT_NAME and settings.BOT_USERNAME:
+        url = f"https://t.me/{settings.BOT_USERNAME}/{settings.MINIAPP_SHORT_NAME}?startapp=gw_{giveaway_id}"
+        button = InlineKeyboardButton(label, url=url)
     else:
         button = InlineKeyboardButton(label, callback_data=f"join_gw_{giveaway_id}")
     return InlineKeyboardMarkup([[button]])
+
+
+def render_owner_template(template: str, *, title: str, winners_text: str = "", count: int = 0, prize: str = "") -> str:
+    """Fill an owner-provided message template.
+
+    Supported placeholders: {winners} {title} {count} {prize} (plus Uzbek
+    aliases {goliblar} {ishtirokchilar}). Plain str.replace so stray braces
+    in the owner's text can't crash formatting.
+    """
+    return (
+        template
+        .replace("{winners}", winners_text)
+        .replace("{goliblar}", winners_text)
+        .replace("{title}", title)
+        .replace("{count}", str(count))
+        .replace("{ishtirokchilar}", str(count))
+        .replace("{prize}", prize or "")
+    )
+
+
+async def get_published_posts(giveaway) -> list[tuple[int, int]]:
+    """All (chat_id, message_id) pairs where this giveaway's post was published."""
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(GiveawayPost).where(GiveawayPost.giveaway_id == giveaway.id)
+        )).scalars().all()
+    posts = [(p.chat_id, p.message_id) for p in rows]
+    # Legacy fallback: giveaways published before the posts table existed
+    if not posts and giveaway.channel_id and giveaway.message_id:
+        posts = [(giveaway.channel_id, giveaway.message_id)]
+    return posts
+
+
+def _target_channel_ids(giveaway) -> list[int]:
+    """Channels the giveaway should be published to."""
+    ids: list[int] = []
+    if giveaway.target_channels:
+        for tok in giveaway.target_channels.split(","):
+            tok = tok.strip()
+            if tok.lstrip("-").isdigit():
+                ids.append(int(tok))
+    if not ids and giveaway.channel_id:
+        ids = [giveaway.channel_id]
+    return ids
+
+
+async def publish_giveaway_to_channels(bot, giveaway, lang: str):
+    """Publish the giveaway post to every target channel.
+
+    Returns (posts, errors): posts = [(chat_id, message_id)], errors =
+    [(channel, exception)]. Persists GiveawayPost rows and sets the primary
+    channel_id/message_id/published_at on success.
+    """
+    targets = _target_channel_ids(giveaway)
+    kb = _join_button(giveaway.id, 0, lang, custom_label=giveaway.button_label)
+
+    posts: list[tuple[int, int]] = []
+    errors: list[tuple[int, Exception]] = []
+    for ch in targets:
+        try:
+            msg = await send_giveaway_post(bot, ch, giveaway, kb)
+            posts.append((msg.chat.id, msg.message_id))
+        except Exception as e:
+            logger.error(f"Publish giveaway {giveaway.id} to {ch} failed: {e}")
+            errors.append((ch, e))
+
+    if posts:
+        async with async_session() as session:
+            g = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway.id))).scalar_one()
+            g.channel_id, g.message_id = posts[0]
+            g.published_at = datetime.utcnow()
+            for chat_id, message_id in posts:
+                session.add(GiveawayPost(giveaway_id=giveaway.id, chat_id=chat_id, message_id=message_id))
+            await session.commit()
+    return posts, errors
+
+
+# Last participant count pushed to each giveaway's channel buttons. Lets the
+# once-per-minute refresh job skip giveaways whose count hasn't changed, so we
+# never re-edit an unchanged post. Freshly published posts show "(0)", so a
+# missing entry is treated as 0.
+_last_pushed_counts: dict[int, int] = {}
+
+
+async def update_all_post_counters(bot, giveaway_id: int) -> None:
+    """Refresh the join-button counter on every published copy of the post.
+
+    No-op when the count is unchanged since the last push, so this is safe to
+    call for every active giveaway once a minute without spamming edits.
+    """
+    async with async_session() as session:
+        gw = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))).scalar_one_or_none()
+        if not gw:
+            return
+        count = (await session.execute(
+            select(func.count(GiveawayParticipant.id)).where(GiveawayParticipant.giveaway_id == giveaway_id)
+        )).scalar() or 0
+
+    if _last_pushed_counts.get(giveaway_id, 0) == count:
+        return  # displayed count already current — skip the edit
+
+    posts = await get_published_posts(gw)
+    if not posts:
+        _last_pushed_counts[giveaway_id] = count
+        return
+
+    lang = await get_user_lang(gw.creator_id)
+    kb = _join_button(giveaway_id, count, lang, custom_label=gw.button_label)
+    for chat_id, message_id in posts:
+        try:
+            await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=kb)
+        except Exception:
+            pass  # "message is not modified", deleted post, etc.
+    _last_pushed_counts[giveaway_id] = count
 
 
 async def _weighted_draw(participants, winner_count: int, boost_channels_str: str | None, bot) -> list:
@@ -102,6 +229,8 @@ async def _weighted_draw(participants, winner_count: int, boost_channels_str: st
 
 def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMarkup:
     """Build share/forward buttons shown to creator after game creation."""
+    from telegram import SwitchInlineQueryChosenChat
+
     bot_username = settings.BOT_USERNAME or "qurachibot"
     deep_link = f"https://t.me/{bot_username}?start={game_type}_{game_id}"
 
@@ -113,7 +242,10 @@ def _share_keyboard(game_type: str, game_id: int, lang: str) -> InlineKeyboardMa
     share_label, link_label = labels.get(lang, labels["uz"])
 
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(share_label, switch_inline_query_chosen_chat=f"{game_type}_{game_id}")],
+        [InlineKeyboardButton(share_label, switch_inline_query_chosen_chat=SwitchInlineQueryChosenChat(
+            query=f"{game_type}_{game_id}",
+            allow_user_chats=True, allow_group_chats=True, allow_channel_chats=True,
+        ))],
         [InlineKeyboardButton(link_label, url=deep_link)],
     ])
 
@@ -174,6 +306,74 @@ async def send_giveaway_post(bot, chat_id, giveaway, keyboard):
         chat_id, giveaway.post_text or giveaway.title,
         parse_mode="HTML", reply_markup=keyboard,
     )
+
+
+async def close_published_post(bot, giveaway) -> None:
+    """Remove the join button from every published copy of the post after the draw."""
+    _last_pushed_counts.pop(giveaway.id, None)  # stop tracking a finished giveaway
+    for chat_id, message_id in await get_published_posts(giveaway):
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id, message_id=message_id, reply_markup=None,
+            )
+        except Exception:
+            pass
+
+
+async def announce_results(bot, giveaway, winners, total_participants: int) -> None:
+    """Announce winners in every channel (as replies to the posts) and DM them.
+
+    Uses the owner's winner_template when set ({winners} {title} {count}
+    {prize} placeholders), otherwise the built-in text.
+    """
+    mention_text = "\n".join(
+        f'🏆 {i+1}. <a href="tg://user?id={w.user_id}">{w.first_name or w.username or "User"}</a>'
+        for i, w in enumerate(winners)
+    )
+    if giveaway.winner_template and giveaway.winner_template.strip():
+        announce_text = render_owner_template(
+            giveaway.winner_template,
+            title=giveaway.title, winners_text=mention_text,
+            count=total_participants, prize=giveaway.prize,
+        )
+    else:
+        announce_text = (
+            f"🎊 <b>{giveaway.title}</b>\n\n"
+            f"👤 Ishtirokchilar: {total_participants}\n\n"
+            f"<b>🏆 G'oliblar:</b>\n{mention_text}\n\n"
+            f"Tabriklaymiz! 🎉"
+        )
+
+    posts = await get_published_posts(giveaway)
+    if posts:
+        for chat_id, message_id in posts:
+            try:
+                await bot.send_message(
+                    chat_id, announce_text, parse_mode="HTML",
+                    reply_to_message_id=message_id,
+                )
+            except Exception as e:
+                logger.warning(f"Could not announce giveaway {giveaway.id} in {chat_id}: {e}")
+    else:
+        # Never published to a channel — announce in the creation chat
+        try:
+            await bot.send_message(giveaway.chat_id, announce_text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning(f"Could not announce giveaway {giveaway.id}: {e}")
+
+    await close_published_post(bot, giveaway)
+
+    for w in winners:
+        try:
+            w_lang = await get_user_lang(w.user_id)
+            win_msgs = {
+                "uz": f"🎉 <b>Tabriklaymiz!</b>\n\n<b>{giveaway.title}</b> o'yinida g'olib bo'ldingiz!\n🎁 {giveaway.prize or ''}\n\nTashkilotchi bilan bog'laning!",
+                "ru": f"🎉 <b>Поздравляем!</b>\n\nВы победили: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
+                "en": f"🎉 <b>Congratulations!</b>\n\nYou won: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
+            }
+            await bot.send_message(w.user_id, win_msgs.get(w_lang, win_msgs["uz"]), parse_mode="HTML")
+        except Exception:
+            pass  # User may have blocked the bot
 
 
 # ─── Create Giveaway (post-based) ────────────────────────────────────────────
@@ -329,23 +529,55 @@ async def giveaway_channel_entered(update: Update, context: ContextTypes.DEFAULT
         await message.reply_text("❌ Bot yoza olmaydi. Botga 'Post xabarlar' ruxsatini bering." if lang == "uz" else "❌ Bot can't post. Give it Post Messages permission.")
         return CHANNEL
 
-    # Save channel info
+    # Save channel info (a giveaway can run on several channels at once)
     try:
         chat_info = await context.bot.get_chat(channel_id)
-        context.user_data["channel_id"] = chat_info.id
-        context.user_data["channel_title"] = chat_info.title
+        ch_id, ch_title = chat_info.id, chat_info.title
     except Exception:
-        context.user_data["channel_id"] = channel_id
-        context.user_data["channel_title"] = str(channel_id)
+        ch_id, ch_title = channel_id, str(channel_id)
 
-    await message.reply_text(f"✅ Kanal: <b>{context.user_data['channel_title']}</b>", parse_mode="HTML")
+    channels = context.user_data.setdefault("channels_list", [])
+    if all(c[0] != ch_id for c in channels):
+        channels.append((ch_id, ch_title))
+    # Primary channel = first added
+    context.user_data["channel_id"] = channels[0][0]
+    context.user_data["channel_title"] = ", ".join(c[1] for c in channels)
 
-    # Ask winner count
+    names = "\n".join(f"• {c[1]}" for c in channels)
+    more_labels = {
+        "uz": (f"✅ Kanallar:\n{names}\n\nYana kanal qo'shasizmi? O'yin barcha kanallarga bir vaqtda joylanadi.", "➕ Yana kanal", "➡️ Davom etish"),
+        "ru": (f"✅ Каналы:\n{names}\n\nДобавить ещё канал? Розыгрыш публикуется во все каналы одновременно.", "➕ Ещё канал", "➡️ Продолжить"),
+        "en": (f"✅ Channels:\n{names}\n\nAdd another channel? The giveaway is posted to all of them.", "➕ Add channel", "➡️ Continue"),
+    }
+    txt, more_lbl, next_lbl = more_labels.get(lang, more_labels["uz"])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(more_lbl, callback_data="gwch_more"),
+         InlineKeyboardButton(next_lbl, callback_data="gwch_next")],
+    ])
+    await message.reply_text(txt, reply_markup=keyboard)
+    return CHANNEL
+
+
+async def giveaway_channel_more_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle '➕ Add channel' / '➡️ Continue' buttons in the channel step."""
+    query = update.callback_query
+    await query.answer()
+    lang = context.user_data.get("lang", "en")
+
+    if query.data == "gwch_more":
+        await query.edit_message_text(
+            "📢 Keyingi kanal @username yoki ID sini yuboring:" if lang == "uz"
+            else "📢 Отправьте @username или ID следующего канала:" if lang == "ru"
+            else "📢 Send the next channel @username or ID:"
+        )
+        return CHANNEL
+
+    # gwch_next → ask winner count
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("1", callback_data="gwwin_1"), InlineKeyboardButton("2", callback_data="gwwin_2"), InlineKeyboardButton("3", callback_data="gwwin_3")],
         [InlineKeyboardButton("5", callback_data="gwwin_5"), InlineKeyboardButton("10", callback_data="gwwin_10")],
     ])
-    await message.reply_text(get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
+    await query.edit_message_text(get_text("gw_ask_winners", lang=lang), reply_markup=keyboard, parse_mode="HTML")
     return WINNERS
 
 
@@ -357,7 +589,7 @@ async def giveaway_winners_selected(update: Update, context: ContextTypes.DEFAUL
     context.user_data["winner_count"] = int(query.data.split("_")[1])
 
     # Ask start time
-    prompt = "⏳ <b>Boshlanish vaqti</b>\n\nHozir yoki sana kiriting: <code>2025-12-31 21:00</code>" if lang == "uz" else "⏳ <b>Start time</b>\n\nNow or enter date: <code>2025-12-31 21:00</code>"
+    prompt = "⏳ <b>Boshlanish vaqti</b> (Toshkent vaqti)\n\nHozir yoki sana kiriting: <code>2025-12-31 21:00</code>" if lang == "uz" else "⏳ <b>Start time</b> (local time)\n\nNow or enter date: <code>2025-12-31 21:00</code>"
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Hozir / Now", callback_data="gwstart_now")]])
     await query.edit_message_text(prompt, reply_markup=keyboard, parse_mode="HTML")
     return START_TIME
@@ -375,7 +607,7 @@ async def giveaway_start_time_handler(update: Update, context: ContextTypes.DEFA
         message = update.message
         text = message.text.strip()
         try:
-            parsed = datetime.strptime(text, "%Y-%m-%d %H:%M")
+            parsed = parse_user_datetime(text)
             if parsed <= datetime.utcnow():
                 await message.reply_text("❌ Bu vaqt o'tgan. Kelajakdagi vaqt kiriting." if lang == "uz" else "❌ Time has passed.")
                 return START_TIME
@@ -413,7 +645,7 @@ async def giveaway_end_time_handler(update: Update, context: ContextTypes.DEFAUL
     else:
         message = update.message
         try:
-            parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+            parsed = parse_user_datetime(message.text.strip())
             start = context.user_data.get("scheduled_start") or datetime.utcnow()
             if parsed <= start:
                 await message.reply_text("❌ Tugash > boshlanish bo'lishi kerak." if lang == "uz" else "❌ End must be after start.")
@@ -445,7 +677,7 @@ async def giveaway_sub_channels_handler(update: Update, context: ContextTypes.DE
         query = update.callback_query
         await query.answer()
         if query.data == "gwsub_done":
-            return await _finalize_full_giveaway(query, context)
+            return await _ask_boost_channels(query, context)
         # Ask for channel input
         await query.edit_message_text("📢 Kanal @username yoki ID yuboring:" if lang == "uz" else "Send channel @username or ID:")
         return SUB_CHANNELS
@@ -465,14 +697,54 @@ async def giveaway_sub_channels_handler(update: Update, context: ContextTypes.DE
         return SUB_CHANNELS
 
 
-async def _finalize_full_giveaway(query, context) -> int:
-    """Save giveaway. QUEUED if scheduled, ACTIVE+publish if now."""
+async def _ask_boost_channels(query, context) -> int:
+    """Ask for optional boost channels (extra win-chance for subscribers)."""
+    lang = context.user_data.get("lang", "en")
+    prompts = {
+        "uz": "🚀 <b>Bonus kanallar</b> (ixtiyoriy)\n\nBu kanallarga obuna bo'lgan ishtirokchilarning yutish ehtimoli oshadi.\nKanal @username larini vergul bilan yuboring yoki o'tkazib yuboring:",
+        "ru": "🚀 <b>Бонусные каналы</b> (необязательно)\n\nПодписчики этих каналов получают повышенный шанс на победу.\nОтправьте @username через запятую или пропустите:",
+        "en": "🚀 <b>Boost channels</b> (optional)\n\nSubscribers of these channels get a higher chance to win.\nSend @usernames comma-separated, or skip:",
+    }
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏭ O'tkazish" if lang == "uz" else "⏭ Skip", callback_data="gwboost_skip")],
+    ])
+    await query.edit_message_text(prompts.get(lang, prompts["uz"]), reply_markup=keyboard, parse_mode="HTML")
+    return BOOST_CHANNELS
+
+
+async def giveaway_boost_channels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle boost channels input (comma-separated) or skip → finalize."""
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        context.user_data["boost_channels"] = None
+        return await _finalize_full_giveaway(query, context)
+
+    channels = parse_channels(update.message.text)
+    context.user_data["boost_channels"] = serialize_channels(channels)
+    return await _finalize_full_giveaway(None, context, user=update.effective_user, chat_id=update.effective_chat.id, bot=context.bot)
+
+
+async def _finalize_full_giveaway(query, context, user=None, chat_id=None, bot=None) -> int:
+    """Save giveaway. QUEUED if scheduled, ACTIVE+publish if now.
+
+    Called either with a callback `query` (user/chat derived from it) or, when
+    the last step was a plain text message, with explicit user/chat_id/bot.
+    """
+    if query is not None:
+        user = query.from_user
+        chat_id = query.message.chat_id
+        bot = context.bot
     lang = context.user_data.get("lang", "en")
     post_data = context.user_data["post_data"]
     scheduled_start = context.user_data.get("scheduled_start")
     sub_channels = context.user_data.get("sub_channels_list", [])
     channels_str = ",".join(sub_channels) if sub_channels else None
+    button_label = context.user_data.get("button_label")
     status = "queued" if scheduled_start else "active"
+
+    channels_pairs = context.user_data.get("channels_list") or []
+    target_channels = ",".join(str(c[0]) for c in channels_pairs) if channels_pairs else None
 
     async with async_session() as session:
         giveaway = Giveaway(
@@ -482,53 +754,63 @@ async def _finalize_full_giveaway(query, context) -> int:
             post_media_type=post_data["post_media_type"],
             winner_count=context.user_data["winner_count"],
             required_channels=channels_str,
+            button_label=button_label,
+            boost_channels=context.user_data.get("boost_channels"),
             status=status,
             channel_id=context.user_data.get("channel_id"),
+            target_channels=target_channels,
             scheduled_start=scheduled_start,
-            creator_id=query.from_user.id,
-            creator_username=query.from_user.username,
-            chat_id=query.message.chat_id,
+            creator_id=user.id,
+            creator_username=user.username,
+            chat_id=chat_id,
             ends_at=context.user_data.get("ends_at"),
         )
         session.add(giveaway)
         await session.commit()
         await session.refresh(giveaway)
 
-    # If immediate, publish now
+    # If immediate, publish to every target channel now
+    publish_error = None
     if not scheduled_start:
-        channel_id = context.user_data.get("channel_id") or query.message.chat_id
-        join_keyboard = _join_button(giveaway.id, 0, lang)
-        try:
-            msg = await send_giveaway_post(context.bot, channel_id, giveaway, join_keyboard)
-            async with async_session() as session:
-                g = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway.id))).scalar_one()
-                g.message_id = msg.message_id
-                g.published_at = datetime.utcnow()
-                await session.commit()
-        except Exception as e:
-            logger.error(f"Publish failed: {e}")
+        if not _target_channel_ids(giveaway):
+            giveaway.channel_id = chat_id  # last resort: creation chat
+        posts, errors = await publish_giveaway_to_channels(bot, giveaway, lang)
+        if errors:
+            publish_error = "; ".join(f"{ch}: {str(e)[:60]}" for ch, e in errors)
+        if not posts and not errors:
+            publish_error = "kanal tanlanmagan"
 
     # Summary
-    start_txt = scheduled_start.strftime("%Y-%m-%d %H:%M") if scheduled_start else "Hozir"
-    end_txt = context.user_data["ends_at"].strftime("%Y-%m-%d %H:%M") if context.user_data.get("ends_at") else "♾"
+    start_txt = fmt_local(scheduled_start, "Hozir")
+    end_txt = fmt_local(context.user_data.get("ends_at"), "♾")
     ch_title = context.user_data.get("channel_title", "—")
+    if publish_error:
+        publish_line = f"❌ Kanalga joylab bo'lmadi: {publish_error[:100]}"
+    elif scheduled_start:
+        publish_line = "⏳ Avtomatik joylanadi."
+    else:
+        publish_line = "🟢 Joylandi!"
     summary = (
         f"✅ <b>O'yin yaratildi!</b>\n\n"
         f"📢 Kanal: <b>{ch_title}</b>\n"
         f"🏆 G'oliblar: {giveaway.winner_count}\n"
         f"⏳ Boshlanishi: {start_txt}\n"
         f"⌛️ Tugashi: {end_txt}\n"
-        f"{'⏳ Avtomatik joylanadi.' if scheduled_start else '🟢 Joylandi!'}"
+        f"{publish_line}"
     )
-    try:
-        await query.delete_message()
-    except Exception:
-        pass
-    await context.bot.send_message(query.message.chat_id, summary, parse_mode="HTML")
+    if query is not None:
+        try:
+            await query.delete_message()
+        except Exception:
+            pass
+    await bot.send_message(chat_id, summary, parse_mode="HTML")
 
     # Share keyboard
-    share_kb = _share_keyboard("gw", giveaway.id, lang)
-    await context.bot.send_message(query.message.chat_id, "👆", reply_markup=share_kb)
+    try:
+        share_kb = _share_keyboard("gw", giveaway.id, lang)
+        await bot.send_message(chat_id, "👆", reply_markup=share_kb)
+    except Exception as e:
+        logger.warning("Share keyboard failed (inline mode off?): %s", e)
 
     context.user_data.clear()
     return ConversationHandler.END
@@ -583,6 +865,7 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
             return
 
         required_channels = parse_channels(giveaway.required_channels)
+        btn_label = giveaway.button_label
 
     # Enforce channel subscription
     if required_channels:
@@ -626,12 +909,11 @@ async def join_giveaway_callback(update: Update, context: ContextTypes.DEFAULT_T
     await verify_pending_referrals(context.bot, user.id)
     await query.answer(get_text("gw_joined", lang=lang, count=participant_count))
 
-    # Update inline keyboard with new participant count
-    join_keyboard = _join_button(giveaway_id, participant_count, lang)
-    try:
-        await query.edit_message_reply_markup(reply_markup=join_keyboard)
-    except Exception:
-        pass
+    # NOTE: the channel post button counter is NOT updated here on purpose.
+    # A dedicated job (refresh_giveaway_counters) refreshes every published
+    # post at most once a minute, so a burst of joins can't flood Telegram's
+    # message-edit rate limit. The user still sees their new count in the
+    # answer toast above immediately.
 
 
 # ─── Draw Winners ───────────────────────────────────────────────────────────────
@@ -701,8 +983,7 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 pass
             return
 
-        winner_count = min(giveaway.winner_count, len(participants))
-        winners = random.sample(participants, winner_count)
+        winners = await _weighted_draw(participants, giveaway.winner_count, giveaway.boost_channels, context.bot)
 
         for winner in winners:
             gw_winner = GiveawayWinner(
@@ -721,40 +1002,10 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"🏆 {i+1}. {_format_user(w)}" for i, w in enumerate(winners)
     )
 
-    # Public announcement with tg://user mention links
-    mention_text = "\n".join(
-        f'🏆 {i+1}. <a href="tg://user?id={w.user_id}">{w.first_name or w.username or "User"}</a>'
-        for i, w in enumerate(winners)
-    )
+    # Announce in channel (reply to post), close the post, DM winners
+    await announce_results(context.bot, giveaway, winners, len(participants))
 
-    # 1. Announce in the channel (public)
-    announce_channel = giveaway.channel_id or giveaway.chat_id
-    try:
-        await context.bot.send_message(
-            announce_channel,
-            f"🎊 <b>{giveaway.title}</b>\n\n"
-            f"👤 Ishtirokchilar: {len(participants)}\n\n"
-            f"<b>🏆 G'oliblar:</b>\n{mention_text}\n\n"
-            f"Tabriklaymiz! 🎉",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.warning(f"Could not announce in channel {announce_channel}: {e}")
-
-    # 2. DM each winner
-    for w in winners:
-        try:
-            w_lang = await get_user_lang(w.user_id)
-            win_msgs = {
-                "uz": f"🎉 <b>Tabriklaymiz!</b>\n\n<b>{giveaway.title}</b> o'yinida g'olib bo'ldingiz!\n🎁 {giveaway.prize or ''}\n\nTashkilotchi bilan bog'laning!",
-                "ru": f"🎉 <b>Поздравляем!</b>\n\nВы победили: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
-                "en": f"🎉 <b>Congratulations!</b>\n\nYou won: <b>{giveaway.title}</b>!\n🎁 {giveaway.prize or ''}",
-            }
-            await context.bot.send_message(w.user_id, win_msgs.get(w_lang, win_msgs["uz"]), parse_mode="HTML")
-        except Exception:
-            pass
-
-    # 3. Confirm to creator
+    # Confirm to creator
     result_text = get_text(
         "gw_results", lang=lang,
         title=giveaway.title,
@@ -769,11 +1020,11 @@ async def draw_giveaway(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def _edit_menu_keyboard(giveaway_id: int, lang: str) -> InlineKeyboardMarkup:
-    """Build the edit menu inline keyboard (6 fields)."""
+    """Build the edit menu inline keyboard (8 fields)."""
     labels = {
-        "uz": ["⏳ Boshlanish vaqti", "⌛️ Tugash vaqti", "🏆 G'oliblar soni", "📑 Tavsif/Post", "🖼 Rasm/GIF", "✅ Obuna kanallar"],
-        "ru": ["⏳ Время начала", "⌛️ Время окончания", "🏆 Кол-во победителей", "📑 Описание", "🖼 Фото/GIF", "✅ Каналы подписки"],
-        "en": ["⏳ Start time", "⌛️ End time", "🏆 Winners", "📑 Description", "🖼 Photo/GIF", "✅ Sub channels"],
+        "uz": ["⏳ Boshlanish vaqti", "⌛️ Tugash vaqti", "🏆 G'oliblar soni", "📑 Tavsif/Post", "🖼 Rasm/GIF", "✅ Obuna kanallar", "🎊 G'oliblar e'loni", "⏰ Eslatma matni"],
+        "ru": ["⏳ Время начала", "⌛️ Время окончания", "🏆 Кол-во победителей", "📑 Описание", "🖼 Фото/GIF", "✅ Каналы подписки", "🎊 Текст итогов", "⏰ Текст напоминания"],
+        "en": ["⏳ Start time", "⌛️ End time", "🏆 Winners", "📑 Description", "🖼 Photo/GIF", "✅ Sub channels", "🎊 Winner post", "⏰ Reminder text"],
     }
     btns = labels.get(lang, labels["uz"])
     gid = giveaway_id
@@ -784,13 +1035,15 @@ def _edit_menu_keyboard(giveaway_id: int, lang: str) -> InlineKeyboardMarkup:
          InlineKeyboardButton(btns[3], callback_data=f"gwedit_text_{gid}")],
         [InlineKeyboardButton(btns[4], callback_data=f"gwedit_photo_{gid}"),
          InlineKeyboardButton(btns[5], callback_data=f"gwedit_channels_{gid}")],
+        [InlineKeyboardButton(btns[6], callback_data=f"gwedit_wintext_{gid}"),
+         InlineKeyboardButton(btns[7], callback_data=f"gwedit_remind_{gid}")],
     ])
 
 
 async def _show_edit_summary(bot, chat_id, giveaway, lang):
     """Send giveaway summary + edit menu."""
-    start_txt = giveaway.scheduled_start.strftime("%Y-%m-%d %H:%M") if giveaway.scheduled_start else "Hozir/Joylangan"
-    end_txt = giveaway.ends_at.strftime("%Y-%m-%d %H:%M") if giveaway.ends_at else "♾"
+    start_txt = fmt_local(giveaway.scheduled_start, "Hozir/Joylangan")
+    end_txt = fmt_local(giveaway.ends_at, "♾")
     ch_title = ""
     if giveaway.channel_id:
         try:
@@ -869,13 +1122,21 @@ async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     context.user_data["editing_gw_id"] = giveaway_id
     context.user_data["editing_field"] = field
 
+    tpl_help = (
+        "\n\nO'zgaruvchilar: <code>{winners}</code> — g'oliblar ro'yxati, <code>{title}</code> — sarlavha, "
+        "<code>{count}</code> — ishtirokchilar soni, <code>{prize}</code> — sovg'a.\n<code>-</code> yuboring — standart matnga qaytarish"
+        if lang == "uz" else
+        "\n\nPlaceholders: <code>{winners}</code>, <code>{title}</code>, <code>{count}</code>, <code>{prize}</code>.\nSend <code>-</code> to reset to default"
+    )
     prompts = {
         "start": "⏳ Yangi boshlanish vaqtini kiriting: <code>2025-12-31 21:00</code>" if lang == "uz" else "⏳ Enter new start time:",
         "end": "⌛️ Yangi tugash vaqtini kiriting: <code>2025-12-31 23:59</code>" if lang == "uz" else "⌛️ Enter new end time:",
         "winners": "🏆 Yangi g'oliblar sonini kiriting (raqam):" if lang == "uz" else "🏆 Enter new winner count:",
         "text": "📑 Yangi tavsif/post matnini yuboring:" if lang == "uz" else "📑 Send new description/post text:",
         "photo": "🖼 Yangi rasm yoki GIF yuboring (yoki matn yuboring o'chirish uchun):" if lang == "uz" else "🖼 Send new photo/GIF (or text to remove):",
-        "channels": "📢 Yangi obuna kanallarni kiriting (vergul bilan):\nMisol: @kanal1, @kanal2\n\n/skip — o'chirish" if lang == "uz" else "📢 Enter channels (comma-separated) or /skip to remove:",
+        "channels": "📢 Yangi obuna kanallarni kiriting (vergul bilan):\nMisol: @kanal1, @kanal2\n\n<code>-</code> yuboring — o'chirish" if lang == "uz" else "📢 Enter channels (comma-separated) or send <code>-</code> to remove:",
+        "wintext": ("🎊 G'oliblar e'lon qilinadigan post matnini yuboring. Qur'a tugagach bot shu matnni kanalga joylaydi." if lang == "uz" else "🎊 Send the winner-announcement post text.") + tpl_help,
+        "remind": ("⏰ Tugashiga 1 soat qolganda kanalga chiqadigan eslatma matnini yuboring." if lang == "uz" else "⏰ Send the 1-hour reminder text.") + tpl_help,
     }
     await query.edit_message_text(prompts.get(field, "?"), parse_mode="HTML")
 
@@ -902,9 +1163,12 @@ async def edit_field_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         updated = False
         if field == "start":
             try:
-                parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+                parsed = parse_user_datetime(message.text)
                 if parsed <= datetime.utcnow():
                     await message.reply_text("❌ Vaqt o'tgan." if lang == "uz" else "❌ Time has passed.")
+                    return
+                if giveaway.status == "active":
+                    await message.reply_text("❌ O'yin allaqachon joylangan — boshlanish vaqtini o'zgartirib bo'lmaydi." if lang == "uz" else "❌ Already published — start time can't be changed.")
                     return
                 giveaway.scheduled_start = parsed
                 updated = True
@@ -914,7 +1178,13 @@ async def edit_field_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         elif field == "end":
             try:
-                parsed = datetime.strptime(message.text.strip(), "%Y-%m-%d %H:%M")
+                parsed = parse_user_datetime(message.text)
+                if parsed <= datetime.utcnow():
+                    await message.reply_text("❌ Vaqt o'tgan." if lang == "uz" else "❌ Time has passed.")
+                    return
+                if giveaway.scheduled_start and parsed <= giveaway.scheduled_start:
+                    await message.reply_text("❌ Tugash > boshlanish bo'lishi kerak." if lang == "uz" else "❌ End must be after start.")
+                    return
                 giveaway.ends_at = parsed
                 updated = True
             except ValueError:
@@ -965,10 +1235,22 @@ async def edit_field_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         elif field == "channels":
             text = message.text.strip()
-            if text.lower() == "/skip":
+            # "/skip" never reaches this handler (commands are filtered), so
+            # also accept "-" / "skip" as the reset value.
+            if text.lower() in ("/skip", "skip", "-"):
                 giveaway.required_channels = None
             else:
                 giveaway.required_channels = text
+            updated = True
+
+        elif field == "wintext":
+            text = (message.text_html or message.text or "").strip()
+            giveaway.winner_template = None if text.lower() in ("/skip", "skip", "-") else text
+            updated = True
+
+        elif field == "remind":
+            text = (message.text_html or message.text or "").strip()
+            giveaway.reminder_template = None if text.lower() in ("/skip", "skip", "-") else text
             updated = True
 
         if updated:
@@ -1024,8 +1306,8 @@ async def _show_my_giveaway_page(bot, chat_id, user_id, page, lang, edit_message
     emoji = status_emoji.get(gw.status, "❓")
     p_count = len(gw.participants)
 
-    start_str = gw.scheduled_start.strftime("%Y-%m-%d %H:%M") if gw.scheduled_start else ""
-    end_str = gw.ends_at.strftime("%Y-%m-%d %H:%M") if gw.ends_at else ""
+    start_str = fmt_local(gw.scheduled_start)
+    end_str = fmt_local(gw.ends_at)
 
     text = (
         f"{emoji} <b>{gw.title}</b>\n\n"
@@ -1081,10 +1363,12 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
 
     if action == "prev":
         page = int(parts[2]) - 1
+        context.user_data["mygw_page"] = max(page, 0)
         await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
 
     elif action == "next":
         page = int(parts[2]) + 1
+        context.user_data["mygw_page"] = page
         await _show_my_giveaway_page(context.bot, query.message.chat_id, user_id, page, lang, edit_message_id=query.message.message_id)
 
     elif action == "noop":
@@ -1104,26 +1388,16 @@ async def my_giveaways_nav_callback(update: Update, context: ContextTypes.DEFAUL
             if not giveaway.participants:
                 await query.answer("Ishtirokchilar yo'q", show_alert=True)
                 return
-            winner_count = min(giveaway.winner_count, len(giveaway.participants))
-            winners = random.sample(list(giveaway.participants), winner_count)
+            total = len(giveaway.participants)
+            winners = await _weighted_draw(giveaway.participants, giveaway.winner_count, giveaway.boost_channels, context.bot)
             for w in winners:
                 session.add(GiveawayWinner(giveaway_id=giveaway_id, user_id=w.user_id, username=w.username, first_name=w.first_name))
             giveaway.status = "completed"
             giveaway.drawn_at = datetime.utcnow()
             await session.commit()
 
-        # Announce
-        mention_text = "\n".join(f'🏆 {i+1}. <a href="tg://user?id={w.user_id}">{w.first_name or w.username or "User"}</a>' for i, w in enumerate(winners))
-        ch = giveaway.channel_id or giveaway.chat_id
-        try:
-            await context.bot.send_message(ch, f"🎊 <b>{giveaway.title}</b>\n\n<b>G'oliblar:</b>\n{mention_text}\n\n🎉", parse_mode="HTML")
-        except Exception:
-            pass
-        for w in winners:
-            try:
-                await context.bot.send_message(w.user_id, f"🎉 Tabriklaymiz! <b>{giveaway.title}</b> g'olibi siz!", parse_mode="HTML")
-            except Exception:
-                pass
+        # Announce in channel (reply to post), close the post, DM winners
+        await announce_results(context.bot, giveaway, winners, total)
 
         await query.answer("🎉 Qur'a o'tkazildi!")
         page = context.user_data.get("mygw_page", 0)
@@ -1498,7 +1772,15 @@ async def notify_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 def get_giveaway_handlers() -> list:
     """Return all giveaway-related handlers."""
     create_conv = ConversationHandler(
-        entry_points=[CommandHandler("newgiveaway", new_giveaway_start)],
+        entry_points=[
+            CommandHandler("newgiveaway", new_giveaway_start),
+            # Reply-menu button must be an entry point too — calling the entry
+            # function from a plain MessageHandler never starts the conversation.
+            MessageHandler(
+                filters.Regex(r"^(🎲 O'yin yaratish|🎲 Создать игру|🎲 Create Game)$"),
+                new_giveaway_start,
+            ),
+        ],
         states={
             POST: [
                 MessageHandler(
@@ -1512,7 +1794,10 @@ def get_giveaway_handlers() -> list:
                 CallbackQueryHandler(giveaway_button_label_handler, pattern=r"^gwbtn_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_button_label_handler),
             ],
-            CHANNEL: [MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channel_entered)],
+            CHANNEL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_channel_entered),
+                CallbackQueryHandler(giveaway_channel_more_callback, pattern=r"^gwch_"),
+            ],
             WINNERS: [CallbackQueryHandler(giveaway_winners_selected, pattern=r"^gwwin_")],
             START_TIME: [
                 CallbackQueryHandler(giveaway_start_time_handler, pattern=r"^gwstart_"),
@@ -1525,6 +1810,10 @@ def get_giveaway_handlers() -> list:
             SUB_CHANNELS: [
                 CallbackQueryHandler(giveaway_sub_channels_handler, pattern=r"^gwsub_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_sub_channels_handler),
+            ],
+            BOOST_CHANNELS: [
+                CallbackQueryHandler(giveaway_boost_channels_handler, pattern=r"^gwboost_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, giveaway_boost_channels_handler),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel_creation)],
