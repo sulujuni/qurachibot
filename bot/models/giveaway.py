@@ -45,6 +45,15 @@ class Giveaway(Base):
     # Boost channels: optional extra-entry channels (comma-separated)
     boost_channels: Mapped[str] = mapped_column(Text, nullable=True)
 
+    # All channels the giveaway should be published to (comma-separated chat
+    # IDs). channel_id/message_id keep pointing at the primary (first) post.
+    target_channels: Mapped[str] = mapped_column(Text, nullable=True)
+
+    # Owner-provided message templates. Placeholders: {winners} {title}
+    # {count} {prize}. NULL → built-in default text.
+    winner_template: Mapped[str] = mapped_column(Text, nullable=True)
+    reminder_template: Mapped[str] = mapped_column(Text, nullable=True)
+
     # Telegram info
     creator_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     creator_username: Mapped[str] = mapped_column(String(255), nullable=True)
@@ -70,6 +79,23 @@ class Giveaway(Base):
 
     def __repr__(self) -> str:
         return f"<Giveaway(id={self.id}, title='{self.title}', status={self.status})>"
+
+
+class GiveawayPost(Base):
+    """A published copy of the giveaway post (one row per channel)."""
+
+    __tablename__ = "giveaway_posts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    giveaway_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("giveaways.id", ondelete="CASCADE"), nullable=False
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"<GiveawayPost(giveaway_id={self.giveaway_id}, chat_id={self.chat_id}, message_id={self.message_id})>"
 
 
 class GiveawayParticipant(Base):

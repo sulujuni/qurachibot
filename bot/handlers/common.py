@@ -19,25 +19,31 @@ def get_main_menu_keyboard(lang: str = "uz") -> ReplyKeyboardMarkup:
     """Build the main menu reply keyboard based on language."""
     menus = {
         "uz": [
-            ["🎲 O'yin yaratish", "📋 Mening o'yinlarim"],
+            ["🎲 O'yin yaratish", "🏅 Konkurs yaratish"],
+            ["📋 Mening o'yinlarim", "🎁 Faol o'yinlar"],
             ["📢 Kanallarim", "✏️ Tahrirlash"],
-            ["🏆 Reyting", "👥 Do'st taklif qilish"],
-            ["🚪 So'rovlarni boshqarish", "📣 Xabar yuborish"],
-            ["⚙️ Sozlamalar", "🐛 Xatolik xabar qilish"],
+            ["🏆 Reyting", "💎 Ballarim"],
+            ["👥 Do'st taklif qilish", "🚪 So'rovlarni boshqarish"],
+            ["📣 Xabar yuborish", "⚙️ Sozlamalar"],
+            ["🐛 Xatolik xabar qilish"],
         ],
         "ru": [
-            ["🎲 Создать игру", "📋 Мои игры"],
+            ["🎲 Создать игру", "🏅 Создать конкурс"],
+            ["📋 Мои игры", "🎁 Активные игры"],
             ["📢 Мои каналы", "✏️ Редактировать"],
-            ["🏆 Рейтинг", "👥 Пригласить друга"],
-            ["🚪 Управление заявками", "📣 Уведомить"],
-            ["⚙️ Настройки", "🐛 Сообщить об ошибке"],
+            ["🏆 Рейтинг", "💎 Мои баллы"],
+            ["👥 Пригласить друга", "🚪 Управление заявками"],
+            ["📣 Уведомить", "⚙️ Настройки"],
+            ["🐛 Сообщить об ошибке"],
         ],
         "en": [
-            ["🎲 Create Game", "📋 My Games"],
+            ["🎲 Create Game", "🏅 Create Contest"],
+            ["📋 My Games", "🎁 Active Games"],
             ["📢 My Channels", "✏️ Edit"],
-            ["🏆 Leaderboard", "👥 Invite Friends"],
-            ["🚪 Join Requests", "📣 Notify"],
-            ["⚙️ Settings", "🐛 Report Bug"],
+            ["🏆 Leaderboard", "💎 My Points"],
+            ["👥 Invite Friends", "🚪 Join Requests"],
+            ["📣 Notify", "⚙️ Settings"],
+            ["🐛 Report Bug"],
         ],
     }
     buttons = menus.get(lang, menus["uz"])
@@ -108,23 +114,31 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         reply_markup=inline_keyboard,
     )
 
-    # Referral deep link: /start ref_<referrer_id>[_<giveaway_id>]
-    # Recorded with verify_subscription=False → pure DB, no Telegram call here.
+    # Deep links: gw_<id> / ct_<id> (share links) or ref_<referrer_id>[_<gw_id>]
     if context.args:
         payload = context.args[0]
 
-        referrer_id, giveaway_id = parse_referral_payload(payload)
-        if referrer_id:
-            try:
-                await process_referral(
-                    context.bot,
-                    referrer_id,
-                    user,
-                    giveaway_id=giveaway_id or None,
-                    verify_subscription=False,
-                )
-            except Exception as e:
-                logger.warning("Referral processing failed for %s: %s", user_id, e)
+        if payload.startswith("gw_") and payload[3:].isdigit():
+            await _send_giveaway_deeplink(update, context, int(payload[3:]), lang)
+        elif payload.startswith("ct_") and payload[3:].isdigit():
+            await _send_contest_deeplink(update, context, int(payload[3:]), lang)
+        elif payload.startswith("gg_") and payload[3:].isdigit():
+            await _send_group_giveaway_deeplink(update, context, int(payload[3:]), lang)
+        else:
+            # Referral: recorded with verify_subscription=False → pure DB, no
+            # Telegram call here (burst-safe).
+            referrer_id, giveaway_id = parse_referral_payload(payload)
+            if referrer_id:
+                try:
+                    await process_referral(
+                        context.bot,
+                        referrer_id,
+                        user,
+                        giveaway_id=giveaway_id or None,
+                        verify_subscription=False,
+                    )
+                except Exception as e:
+                    logger.warning("Referral processing failed for %s: %s", user_id, e)
 
     # If user is not CAPTCHA-verified, send CAPTCHA directly (no button needed)
     if not await is_user_verified(user_id):
@@ -143,6 +157,91 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"Javobni raqam bilan yuboring:",
             parse_mode="HTML",
         )
+
+
+async def _send_giveaway_deeplink(update: Update, context: ContextTypes.DEFAULT_TYPE, giveaway_id: int, lang: str) -> None:
+    """Show a giveaway (from a t.me/...?start=gw_<id> share link) with a join button."""
+    from sqlalchemy import func as sql_func, select
+    from bot.models.giveaway import Giveaway, GiveawayParticipant
+    from bot.handlers.giveaway import _join_button, send_giveaway_post
+
+    async with async_session() as session:
+        gw = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))).scalar_one_or_none()
+        if not gw or gw.status not in ("active", "queued"):
+            await update.message.reply_text(
+                "❌ Bu o'yin topilmadi yoki tugagan." if lang == "uz"
+                else "❌ Розыгрыш не найден или завершён." if lang == "ru"
+                else "❌ This giveaway was not found or has ended."
+            )
+            return
+        count = (await session.execute(
+            select(sql_func.count(GiveawayParticipant.id)).where(GiveawayParticipant.giveaway_id == giveaway_id)
+        )).scalar() or 0
+
+    # Private chat → web_app button is allowed; nicer join experience.
+    kb = _join_button(gw.id, count, lang, custom_label=gw.button_label, use_webapp=True)
+    try:
+        await send_giveaway_post(context.bot, update.effective_chat.id, gw, kb)
+    except Exception as e:
+        logger.warning("Deep-link giveaway send failed: %s", e)
+
+
+async def _send_contest_deeplink(update: Update, context: ContextTypes.DEFAULT_TYPE, contest_id: int, lang: str) -> None:
+    """Show a contest (from a t.me/...?start=ct_<id> share link) with a submit button."""
+    from sqlalchemy import select
+    from bot.models.contest import Contest, ContestStatus
+
+    async with async_session() as session:
+        ct = (await session.execute(select(Contest).where(Contest.id == contest_id))).scalar_one_or_none()
+
+    if not ct or ct.status in (ContestStatus.COMPLETED, ContestStatus.CANCELLED):
+        await update.message.reply_text(
+            "❌ Konkurs topilmadi yoki tugagan." if lang == "uz"
+            else "❌ Конкурс не найден или завершён." if lang == "ru"
+            else "❌ Contest not found or ended."
+        )
+        return
+
+    body = ct.post_text or f"🏅 <b>{ct.title}</b>\n\n{ct.description or ''}"
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "📤 Qatnashish" if lang == "uz" else "📤 Участвовать" if lang == "ru" else "📤 Submit",
+            callback_data=f"submit_contest_{ct.id}",
+        )
+    ]])
+    await update.message.reply_text(body, reply_markup=kb, parse_mode="HTML")
+
+
+async def _send_group_giveaway_deeplink(update: Update, context: ContextTypes.DEFAULT_TYPE, gg_id: int, lang: str) -> None:
+    """Show comment-giveaway info (from a t.me/...?start=gg_<id> link) with a jump link."""
+    from sqlalchemy import select
+    from bot.models.group_giveaway import GroupGiveaway, GroupGiveawayStatus
+
+    async with async_session() as session:
+        gg = (await session.execute(select(GroupGiveaway).where(GroupGiveaway.id == gg_id))).scalar_one_or_none()
+
+    if not gg or gg.status != GroupGiveawayStatus.ACTIVE:
+        await update.message.reply_text(
+            "❌ Bu o'yin topilmadi yoki tugagan." if lang == "uz"
+            else "❌ Розыгрыш не найден или завершён." if lang == "ru"
+            else "❌ This giveaway was not found or has ended."
+        )
+        return
+
+    body = gg.post_text or f"🎁 <b>{gg.title}</b>"
+    hint = {
+        "uz": "\n\n💬 Qatnashish uchun yuqoridagi post joylashgan guruh/kanaldagi postga izoh yozing.",
+        "ru": "\n\n💬 Чтобы участвовать, оставьте комментарий под постом в группе/канале.",
+        "en": "\n\n💬 To enter, comment under the post in the group/channel.",
+    }
+    kb = None
+    if gg.message_id and gg.chat_id and str(gg.chat_id).startswith("-100"):
+        post_url = f"https://t.me/c/{str(gg.chat_id)[4:]}/{gg.message_id}"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "➡️ Postga o'tish" if lang == "uz" else "➡️ К посту" if lang == "ru" else "➡️ Go to post",
+            url=post_url,
+        )]])
+    await update.message.reply_text(body + hint.get(lang, hint["uz"]), reply_markup=kb, parse_mode="HTML")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -345,6 +444,73 @@ async def menu_create_contest(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle '🏅 Create Contest' button tap — start contest creation."""
     from bot.handlers.contest import new_contest_start
     await new_contest_start(update, context)
+
+
+async def menu_active_games(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '🎁 Active Games' button tap — browse joinable giveaways (mirrors the Mini App home tab)."""
+    from sqlalchemy import func as sql_func, select
+    from bot.models.giveaway import Giveaway, GiveawayParticipant
+    from bot.handlers.giveaway import _join_button
+
+    user_id = update.effective_user.id
+    lang = await get_user_lang(user_id)
+
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(Giveaway).where(
+                Giveaway.status == "active",
+                Giveaway.is_test == False,  # noqa: E712
+            ).order_by(Giveaway.created_at.desc()).limit(10)
+        )).scalars().all()
+
+        counts = {}
+        joined_ids = set()
+        for gw in rows:
+            counts[gw.id] = (await session.execute(
+                select(sql_func.count(GiveawayParticipant.id)).where(GiveawayParticipant.giveaway_id == gw.id)
+            )).scalar() or 0
+        if rows:
+            joined = (await session.execute(
+                select(GiveawayParticipant.giveaway_id).where(
+                    GiveawayParticipant.user_id == user_id,
+                    GiveawayParticipant.giveaway_id.in_([g.id for g in rows]),
+                )
+            )).scalars().all()
+            joined_ids = set(joined)
+
+    headers = {
+        "uz": "🎁 <b>Faol o'yinlar</b>\n\nQatnashish uchun tugmani bosing:",
+        "ru": "🎁 <b>Активные розыгрыши</b>\n\nНажмите кнопку, чтобы участвовать:",
+        "en": "🎁 <b>Active Giveaways</b>\n\nTap a button to join:",
+    }
+    if not rows:
+        empty = {
+            "uz": "🎁 Hozircha faol o'yinlar yo'q.\n\n🔔 Yangi o'yinlar haqida xabar olish uchun Sozlamalarda bildirishnomalarni yoqing.",
+            "ru": "🎁 Пока нет активных розыгрышей.\n\n🔔 Включите уведомления в Настройках.",
+            "en": "🎁 No active giveaways right now.\n\n🔔 Enable alerts in Settings to get notified.",
+        }
+        await update.message.reply_text(empty.get(lang, empty["uz"]))
+        return
+
+    buttons = []
+    for gw in rows:
+        mark = "✅ " if gw.id in joined_ids else "🎮 "
+        buttons.append([InlineKeyboardButton(
+            f"{mark}{gw.title[:40]} ({counts[gw.id]})",
+            callback_data=f"join_gw_{gw.id}",
+        )])
+    extra = _miniapp_extra_button("home", lang)
+    buttons.extend(extra)
+    await update.message.reply_text(
+        headers.get(lang, headers["uz"]),
+        reply_markup=InlineKeyboardMarkup(buttons), parse_mode="HTML",
+    )
+
+
+async def menu_points(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle '💎 My Points' button tap."""
+    from bot.handlers.loyalty_handler import points_command
+    await points_command(update, context)
 
 
 async def menu_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1140,6 +1306,8 @@ def get_common_handlers() -> list:
         MessageHandler(filters.Regex(r"^(✏️ Tahrirlash|✏️ Редактировать|✏️ Edit)$"), menu_edit),
         MessageHandler(filters.Regex(r"^(📣 Xabar yuborish|📣 Уведомить|📣 Notify)$"), menu_notify),
         MessageHandler(filters.Regex(r"^(🏅 Konkurs yaratish|🏅 Создать конкурс|🏅 Create Contest)$"), menu_create_contest),
+        MessageHandler(filters.Regex(r"^(🎁 Faol o'yinlar|🎁 Активные игры|🎁 Active Games)$"), menu_active_games),
+        MessageHandler(filters.Regex(r"^(💎 Ballarim|💎 Мои баллы|💎 My Points)$"), menu_points),
         MessageHandler(filters.Regex(r"^(🏆 Reyting|🏆 Рейтинг|🏆 Leaderboard)$"), menu_leaderboard),
         MessageHandler(filters.Regex(r"^(👥 Do'st taklif qilish|👥 Пригласить друга|👥 Invite Friends)$"), menu_referral),
         MessageHandler(filters.Regex(r"^(🚪 So'rovlarni boshqarish|🚪 Управление заявками|🚪 Join Requests|🚪 Join filter|🚪 Join Filter)$"), menu_joinfilter),

@@ -28,6 +28,12 @@ class Settings:
     # Example: https://bot.yourdomain.com or your Cloudflare tunnel URL.
     WEB_URL: str = os.getenv("WEB_URL", "")
     BOT_USERNAME: str = os.getenv("BOT_USERNAME", "")
+    # IANA timezone users enter/see times in. DB stores naive UTC.
+    TIMEZONE: str = os.getenv("TIMEZONE", "Asia/Tashkent")
+    # Mini App short name from @BotFather (/newapp). When set, channel-post
+    # join buttons become direct-link Mini App URL buttons
+    # (t.me/<bot>/<short_name>?startapp=gw_<id>) instead of callback buttons.
+    MINIAPP_SHORT_NAME: str = os.getenv("MINIAPP_SHORT_NAME", "")
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "20"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "30"))
     # Max updates processed concurrently. Removes the default sequential

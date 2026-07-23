@@ -17,6 +17,7 @@ from bot.handlers.group_giveaway import get_group_giveaway_handlers, _load_activ
 from bot.handlers.join_request import get_join_request_handlers
 from bot.handlers.comment_randomizer import get_comment_randomizer_handlers
 from bot.handlers.captcha_handler import get_captcha_handlers
+from bot.handlers.inline import get_inline_handlers
 from bot.handlers.loyalty_handler import get_loyalty_handlers
 from bot.handlers.referral_handler import get_referral_handlers
 from bot.jobs import (
@@ -24,6 +25,7 @@ from bot.jobs import (
     check_expired_group_giveaways,
     check_submission_deadlines,
     publish_queued_giveaways,
+    refresh_giveaway_counters,
     send_new_event_alerts,
     send_reminders,
 )
@@ -120,6 +122,17 @@ async def post_init(application: Application) -> None:
                     added_at TIMESTAMP DEFAULT NOW()
                 )""",
                 "CREATE INDEX IF NOT EXISTS ix_user_channels_user_id ON user_channels(user_id)",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS target_channels TEXT",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS winner_template TEXT",
+                "ALTER TABLE giveaways ADD COLUMN IF NOT EXISTS reminder_template TEXT",
+                """CREATE TABLE IF NOT EXISTS giveaway_posts (
+                    id SERIAL PRIMARY KEY,
+                    giveaway_id INTEGER NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    published_at TIMESTAMP DEFAULT NOW()
+                )""",
+                "CREATE INDEX IF NOT EXISTS ix_giveaway_posts_gw ON giveaway_posts(giveaway_id)",
             ]
             for stmt in migrations:
                 try:
@@ -272,6 +285,9 @@ async def post_init(application: Application) -> None:
         job_queue.run_repeating(check_expired_group_giveaways, interval=60, first=20)
         # Check contest submission deadlines every 60 seconds
         job_queue.run_repeating(check_submission_deadlines, interval=60, first=15)
+        # Refresh giveaway post join-button counters once a minute (batched,
+        # instead of editing on every join → avoids Telegram edit rate limits)
+        job_queue.run_repeating(refresh_giveaway_counters, interval=60, first=25)
         # Send ending-soon reminders every 5 minutes
         job_queue.run_repeating(send_reminders, interval=300, first=30)
         # Send new event alerts every 5 minutes
@@ -326,6 +342,8 @@ def main() -> None:
     for handler in get_comment_randomizer_handlers():
         application.add_handler(handler)
     for handler in get_captcha_handlers():
+        application.add_handler(handler)
+    for handler in get_inline_handlers():
         application.add_handler(handler)
     for handler in get_alert_handlers():
         application.add_handler(handler)

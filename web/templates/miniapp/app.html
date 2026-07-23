@@ -1067,6 +1067,15 @@ async function initApp() {
             .observe(contentEl, { childList: true });
     }
 
+    // Direct-link Mini App open from a channel post button:
+    // t.me/<bot>/<app>?startapp=gw_<id> → jump straight to the join screen
+    const startParam = tg.initDataUnsafe?.start_param || new URLSearchParams(window.location.search).get('tgWebAppStartParam');
+    if (startParam && /^gw_\d+$/.test(startParam)) {
+        currentTab = 'home';
+        openGiveaway(parseInt(startParam.slice(3)));
+        return;
+    }
+
     // Load initial tab
     const initTab = new URLSearchParams(window.location.search).get('tab') || 'home';
     switchTab(initTab);
@@ -1319,22 +1328,93 @@ async function openGiveaway(id) {
     el.innerHTML = html;
 }
 
+// ─── Animated join flow ─────────────────────────────────────────────
+(function(){
+    const s = document.createElement('style');
+    s.textContent = `
+    @keyframes jgPop { 0%{transform:scale(0);opacity:0;} 60%{transform:scale(1.15);} 80%{transform:scale(0.95);} 100%{transform:scale(1);opacity:1;} }
+    @keyframes jgRing { 0%{transform:scale(0.6);opacity:0.8;} 100%{transform:scale(1.8);opacity:0;} }
+    @keyframes jgUp { from{transform:translateY(14px);opacity:0;} to{transform:translateY(0);opacity:1;} }
+    @keyframes jgShake { 0%,100%{transform:translateX(0);} 20%,60%{transform:translateX(-7px);} 40%,80%{transform:translateX(7px);} }
+    .jg-center{text-align:center;padding:34px 14px;}
+    .jg-badge{position:relative;width:96px;height:96px;margin:0 auto 18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:46px;background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;animation:jgPop .55s cubic-bezier(.2,1.4,.4,1) both;box-shadow:0 10px 30px rgba(34,197,94,.35);}
+    .jg-badge::after{content:'';position:absolute;inset:0;border-radius:50%;border:3px solid #22c55e;animation:jgRing 1s ease-out .3s 2;}
+    .jg-badge.warn{background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 10px 30px rgba(245,158,11,.35);}
+    .jg-badge.warn::after{border-color:#f59e0b;}
+    .jg-title{font-size:19px;font-weight:800;animation:jgUp .4s ease .15s both;}
+    .jg-sub{font-size:13.5px;color:var(--text-hint);margin-top:8px;line-height:1.55;animation:jgUp .4s ease .25s both;}
+    .jg-shake{animation:jgShake .45s ease;}
+    `;
+    document.head.appendChild(s);
+})();
+
+function _jgSubList(channels) {
+    let html = '';
+    (channels || []).forEach(ch => {
+        const link = typeof ch === 'string' && ch.startsWith('@') ? `https://t.me/${ch.slice(1)}` : `https://t.me/c/${String(ch).replace('-100','')}`;
+        html += `<a href="${link}" target="_blank" class="sub-link" style="animation:jgUp .4s ease both;">${ic('megaphone',17)} ${ch}</a>`;
+    });
+    return html;
+}
+
 async function joinGiveawayDetail(id) {
     const btn = document.getElementById('gwJoinBtn') || event.target;
     btn.disabled = true;
     btn.innerHTML = ic('refresh',16) + ' ...';
     const res = await api(`/giveaway/${id}/join`, 'POST');
+    const el = document.getElementById('content');
+
+    // Not subscribed yet → animated subscription checklist with re-check
+    if (res.error && res.must_subscribe && res.must_subscribe.length) {
+        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('warning');
+        const subTitle = currentLang==='uz' ? "Bir qadam qoldi!" : currentLang==='ru' ? 'Остался один шаг!' : 'One step left!';
+        const subText = currentLang==='uz' ? "Qatnashish uchun quyidagi kanallarga obuna bo'ling, so'ng «Tekshirish» tugmasini bosing." :
+            currentLang==='ru' ? 'Подпишитесь на каналы ниже, затем нажмите «Проверить».' :
+            'Subscribe to the channels below, then tap “Check”.';
+        const checkLbl = currentLang==='uz' ? "✅ Obuna bo'ldim — Tekshirish" : currentLang==='ru' ? '✅ Подписался — Проверить' : "✅ I've subscribed — Check";
+        el.innerHTML = `
+        <div class="card jg-shake">
+            <div class="jg-center" style="padding-bottom:10px;">
+                <div class="jg-badge warn">📢</div>
+                <div class="jg-title">${subTitle}</div>
+                <div class="jg-sub">${subText}</div>
+            </div>
+            <div style="margin:6px 0 14px;">${_jgSubList(res.must_subscribe)}</div>
+            <button class="btn btn-primary" id="gwJoinBtn" onclick="joinGiveawayDetail(${id})">${checkLbl}</button>
+            <button class="btn btn-secondary" style="margin-top:10px;opacity:0.7;" onclick="openGiveaway(${id})">← ${currentLang==='uz'?'Orqaga':currentLang==='ru'?'Назад':'Back'}</button>
+        </div>`;
+        return;
+    }
+
     if (res.error) {
         showToast(res.error, 'error');
+        if (res.need_captcha) {
+            const capMsg = currentLang==='uz' ? "Avval botda /start bosib, tekshiruvdan o'ting." :
+                currentLang==='ru' ? 'Сначала пройдите проверку в боте (/start).' : 'Complete verification in the bot first (/start).';
+            showToast(capMsg, 'error');
+        }
         btn.disabled = false;
         btn.innerHTML = ic('dice',18) + ' ' + t('join_btn');
         return;
     }
-    btn.innerHTML = ic('check',18) + ' ' + t('joined_btn');
-    btn.classList.remove('btn-primary');
-    btn.classList.add('btn-secondary');
-    showToast(t('join_success'));
+
+    // Success — full-screen animated celebration
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    fireConfetti();
+    const okTitle = currentLang==='uz' ? "Siz o'yinda qatnashyapsiz!" : currentLang==='ru' ? 'Вы участвуете в розыгрыше!' : "You're in the giveaway!";
+    const okText = currentLang==='uz' ? `Omad tilaymiz! 🍀 Hozircha ${res.participants || 1} kishi qatnashmoqda.\nNatijalar shu kanalda e'lon qilinadi.` :
+        currentLang==='ru' ? `Удачи! 🍀 Сейчас участвует ${res.participants || 1} чел.\nИтоги будут объявлены в канале.` :
+        `Good luck! 🍀 ${res.participants || 1} participants so far.\nResults will be announced in the channel.`;
+    el.innerHTML = `
+    <div class="card">
+        <div class="jg-center">
+            <div class="jg-badge">✓</div>
+            <div class="jg-title">${okTitle}</div>
+            <div class="jg-sub">${okText}</div>
+        </div>
+        <button class="btn btn-secondary" onclick="tg.close ? tg.close() : switchTab('home')">${currentLang==='uz'?'Yopish':currentLang==='ru'?'Закрыть':'Close'}</button>
+        <button class="btn btn-secondary" style="margin-top:10px;opacity:0.7;" onclick="switchTab('home')">${currentLang==='uz'?"Boshqa o'yinlarni ko'rish":currentLang==='ru'?'Другие розыгрыши':'More giveaways'}</button>
+    </div>`;
 }
 </script>
 
@@ -1438,7 +1518,21 @@ async function myGameCancel(id) {
     renderGames();
 }
 
-function myGameShare(id) {
+async function myGameShare(id) {
+    // Share the FULL giveaway post (media + join button) via Telegram's native
+    // share sheet. Falls back to a deep link where shareMessage is unavailable.
+    if (tg.shareMessage) {
+        try {
+            const res = await api('/prepare-share', 'POST', { giveaway_id: id });
+            if (res && res.prepared_message_id) {
+                tg.shareMessage(res.prepared_message_id, (sent) => {
+                    if (sent && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                });
+                return;
+            }
+            if (res && res.error) showToast(res.error, 'error');
+        } catch (e) { /* fall through to link share */ }
+    }
     const botUser = 'qurachibot';
     const deepLink = `https://t.me/${botUser}?start=gw_${id}`;
     const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}`;
@@ -1541,7 +1635,19 @@ async function renderLeaders() {
 
 <script>
 // ─── CREATE TAB ────────────────────────────────────────────────
-let createType = 'comment';
+let createType = 'giveaway';
+
+// datetime-local value (user's local time) → UTC ISO string for the API
+function dtToIso(v) { return v ? new Date(v).toISOString() : null; }
+
+// Append a channel to the publish-channels input (multi-channel giveaways)
+function addChannelToInput(chatId) {
+    const inp = document.getElementById('cChannelId');
+    if (!inp) return;
+    const parts = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!parts.includes(String(chatId))) parts.push(String(chatId));
+    inp.value = parts.join(', ');
+}
 
 function durationOptions() {
     return `
@@ -1567,6 +1673,7 @@ function renderCreate() {
         <div class="card-title"><span class="ci">${ic('plus')}</span>${t('create_title')}</div>
         <p style="font-size:12.5px;color:var(--text-hint);margin-bottom:14px;">${t('create_desc')}</p>
         <div class="chip-row">
+            <span class="chip ${createType==='giveaway'?'selected':''}" onclick="setCreateType('giveaway')">${ic('gift',15)} ${t('btn_giveaway')}</span>
             <span class="chip ${createType==='comment'?'selected':''}" onclick="setCreateType('comment')">${ic('message',15)} ${t('comment_giveaway')}</span>
             <span class="chip ${createType==='contest'?'selected':''}" onclick="setCreateType('contest')">${ic('medal',15)} ${t('contest')}</span>
         </div>
@@ -1610,7 +1717,59 @@ function renderCreateForm() {
             <div id="previewText" style="font-size:13.5px;line-height:1.5;white-space:pre-wrap;"></div>
         </div>`;
 
-    if (createType === 'comment') {
+    if (createType === 'giveaway') {
+        const addBtnHint = currentLang === 'uz' ? "Post kanalga tugma bilan joylanadi — bosgan odam qatnashadi" :
+            currentLang === 'ru' ? 'Пост публикуется с кнопкой — нажал и участвуешь' :
+            'The post is published with a Join button';
+        f.innerHTML = `
+        <div class="info-box">
+            <b>${t('btn_giveaway')}</b><br>${addBtnHint}
+        </div>
+        ${postBlock}
+        <div class="form-group"><label class="form-label">${t('f_winners')}</label>
+            <input class="form-input" id="cWinners" type="number" value="1" min="1"></div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?'🔘 Tugma matni':currentLang==='ru'?'🔘 Текст кнопки':'🔘 Button label'}</label>
+            <select class="form-select" id="cButtonLabel">
+                <option value="">${currentLang==='uz'?'Standart':'Default'}</option>
+                <option value="🎁 ${currentLang==='uz'?'Qatnashish!':currentLang==='ru'?'Участвовать!':'Participate!'}">🎁 ${currentLang==='uz'?'Qatnashish!':currentLang==='ru'?'Участвовать!':'Participate!'}</option>
+                <option value="💎 ${currentLang==='uz'?"Qo'shilish":currentLang==='ru'?'Вступить':'Join'}">💎 ${currentLang==='uz'?"Qo'shilish":currentLang==='ru'?'Вступить':'Join'}</option>
+                <option value="🍀 ${currentLang==='uz'?'Men ham!':currentLang==='ru'?'Я в деле!':"I'm in!"}">🍀 ${currentLang==='uz'?'Men ham!':currentLang==='ru'?'Я в деле!':"I'm in!"}</option>
+                <option value="custom">${currentLang==='uz'?"O'zim yozaman":currentLang==='ru'?'Написать своё':'Custom'}</option>
+            </select>
+            <input class="form-input hidden" id="cButtonLabelCustom" placeholder="${currentLang==='uz'?'Tugma matnini kiriting':'Type button text'}" style="margin-top:6px;">
+        </div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?"⚡️ Bonus kanallar (ixtiyoriy, maks 3)":currentLang==='ru'?'⚡️ Бонусные каналы (необяз., макс 3)':'⚡️ Boost channels (optional, max 3)'}</label>
+            <input class="form-input" id="cBoostChannels" placeholder="@channel1, @channel2, @channel3">
+            <div class="form-hint">${currentLang==='uz'?"Ishtirokchilar har bir bonus kanalga obuna bo'lsa qo'shimcha imkoniyat oladi":currentLang==='ru'?'Участники получают доп. шансы за подписку':'Participants get extra entries for each boost subscription'}</div>
+        </div>
+        <div class="form-group"><label class="form-label">${t('f_duration')}</label>
+            <select class="form-select" id="cDuration">${durationOptions()}</select></div>
+        <div class="form-group hidden" id="gwDeadlineBox"><label class="form-label">${t('f_deadline')}</label>
+            <input class="form-input" id="cDeadline" type="datetime-local">
+            <div class="form-hint">${t('f_deadline_hint')}</div></div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?'⏳ Boshlanish vaqti (ixtiyoriy)':currentLang==='ru'?'⏳ Время начала (необяз.)':'⏳ Start time (optional)'}</label>
+            <input class="form-input" id="cStartTime" type="datetime-local">
+            <div class="form-hint">${currentLang==='uz'?"Bo'sh qoldiring — darhol joylanadi. Tanlangan vaqtda bot postni kanalga o'zi joylaydi.":currentLang==='ru'?'Оставьте пустым — опубликуется сразу. Иначе бот сам опубликует пост в выбранное время.':'Leave empty — publishes immediately. Otherwise the bot posts it at the chosen time.'}</div></div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?'📢 Kanallar (o\'yin joylanadigan)':currentLang==='ru'?'📢 Каналы публикации':'📢 Publish channels'}</label>
+            <div id="channelPicker" style="margin-bottom:8px;display:flex;flex-wrap:wrap;gap:6px;"></div>
+            <input class="form-input" id="cChannelId" placeholder="${currentLang==='uz'?'@kanal1, @kanal2 yoki -100... ID':currentLang==='ru'?'@канал1, @канал2 или -100... ID':'@ch1, @ch2 or -100... ID'}">
+            <div class="form-hint">${currentLang==='uz'?"Bir nechta kanalni vergul bilan kiriting — o'yin hammasiga bir vaqtda joylanadi. Bot har birida admin bo'lishi kerak.":currentLang==='ru'?'Несколько каналов через запятую — розыгрыш публикуется во все сразу. Бот должен быть админом в каждом.':'Multiple channels comma-separated — the giveaway is posted to all of them. Bot must be admin in each.'}</div></div>
+        <div class="form-group"><label class="form-label">${t('f_channels')}</label>
+            <input class="form-input" id="cChannels" placeholder="@channel1, @channel2">
+            <div class="form-hint">${t('f_channels_hint')}</div></div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?"🎊 G'oliblar e'loni matni (ixtiyoriy)":currentLang==='ru'?'🎊 Текст поста с итогами (необяз.)':'🎊 Winner announcement text (optional)'}</label>
+            <textarea class="form-textarea" id="cWinnerTpl" style="min-height:80px;" placeholder="${currentLang==='uz'?"Masalan: 🎉 {title} yakunlandi!\nG'oliblar:\n{winners}\nJami {count} ishtirokchi.":currentLang==='ru'?'Напр.: 🎉 {title} завершён!\nПобедители:\n{winners}':'e.g. 🎉 {title} finished!\nWinners:\n{winners}'}"></textarea>
+            <div class="form-hint">${currentLang==='uz'?"Bo'sh qoldirsangiz — standart matn. O'zgaruvchilar: {winners} — g'oliblar, {title} — sarlavha, {count} — ishtirokchilar soni, {prize} — sovg'a.":currentLang==='ru'?'Пусто — стандартный текст. Переменные: {winners}, {title}, {count}, {prize}.':'Empty — default text. Placeholders: {winners}, {title}, {count}, {prize}.'}</div></div>
+        <div class="form-group"><label class="form-label">${currentLang==='uz'?"⏰ Eslatma matni (ixtiyoriy)":currentLang==='ru'?'⏰ Текст напоминания (необяз.)':'⏰ Reminder text (optional)'}</label>
+            <textarea class="form-textarea" id="cReminderTpl" style="min-height:60px;" placeholder="${currentLang==='uz'?"Tugashiga 1 soat qolganda kanalga chiqadi":currentLang==='ru'?'Выйдет за 1 час до завершения':'Posted 1 hour before the end'}"></textarea>
+            <div class="form-hint">${currentLang==='uz'?"O'zgaruvchilar: {title}, {count}, {prize}":'{title}, {count}, {prize}'}</div></div>
+        <div class="form-group" style="display:flex;align-items:center;gap:10px;">
+            <input type="checkbox" id="cIsTest" style="width:20px;height:20px;flex-shrink:0;">
+            <label for="cIsTest" style="font-size:13px;font-weight:600;cursor:pointer;">${currentLang==='uz'?"🧪 Test rejim (foydalanuvchilarga xabar bermaydi)":currentLang==='ru'?'🧪 Тест (не уведомлять пользователей)':'🧪 Test mode (no notifications)'}</label>
+        </div>
+        <button class="btn btn-primary" onclick="submitGiveaway()">${ic('gift',18)} ${t('create_btn')}</button>`;
+        setTimeout(loadChannelPicker, 100);
+    } else if (createType === 'comment') {
         f.innerHTML = `
         <div class="info-box">
             <b>${t('comment_giveaway')}</b><br>${t('gw_desc_cmt')}
@@ -1820,7 +1979,7 @@ async function submitCommentGiveaway() {
         post_file_id: uploadedFileId || null,
         winner_count: parseInt(document.getElementById('cWinners').value) || 1,
         duration: duration,
-        deadline: deadline,
+        deadline: dtToIso(deadline),
         mode: mode,
         is_test: document.getElementById('cIsTest')?.checked || false,
         keyword: mode === 'keyword' ? (document.getElementById('cKeyword').value.trim() || null) : null,
@@ -1842,7 +2001,7 @@ async function loadChannelPicker() {
             let html = '';
             channels.forEach(ch => {
                 const name = ch.title || ch.chat_id;
-                html += `<button type="button" class="chip" style="font-size:12px;padding:6px 12px;min-height:32px;" onclick="document.getElementById('cChannelId').value='${ch.chat_id}'">${ic('megaphone',13)} ${name}</button>`;
+                html += `<button type="button" class="chip" style="font-size:12px;padding:6px 12px;min-height:32px;" onclick="addChannelToInput('${ch.chat_id}')">${ic('megaphone',13)} ${name}</button>`;
             });
             container.innerHTML = html;
         }
@@ -1890,8 +2049,8 @@ async function submitContest() {
         button_label: buttonLabel,
         boost_channels: document.getElementById('cBoostChannels')?.value.trim() || null,
         duration: duration,
-        deadline: deadline,
-        scheduled_start: document.getElementById('cStartTime')?.value || null,
+        deadline: dtToIso(deadline),
+        scheduled_start: dtToIso(document.getElementById('cStartTime')?.value || null),
         channel_id: document.getElementById('cChannelId')?.value.trim() || null,
         required_channels: document.getElementById('cChannels')?.value.trim() || null,
     };
@@ -1899,7 +2058,70 @@ async function submitContest() {
     if (res.error) { showToast(res.error, 'error'); return; }
     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
     uploadedFileId = null; uploadedPhotoDataUrl = null;
-    showCreatedSharePrompt(res.id, 'ct');
+    // If a join-button giveaway was created alongside, share that (it carries the button)
+    if (res.giveaway_id) showCreatedSharePrompt(res.giveaway_id, 'gw');
+    else showCreatedSharePrompt(res.id, 'ct');
+}
+
+async function submitGiveaway() {
+    const postText = document.getElementById('cPostText').value.trim();
+    if (!postText) { showToast(t('f_post_required'), 'error'); return; }
+
+    const durVal = document.getElementById('cDuration')?.value;
+    let duration = durVal || '24h';
+    let deadline = null;
+    if (durVal === 'custom') {
+        deadline = document.getElementById('cDeadline')?.value;
+        if (!deadline) { showToast("Tugash vaqtini kiriting!", 'error'); return; }
+        duration = null;
+    }
+
+    let buttonLabel = null;
+    const btnSelect = document.getElementById('cButtonLabel');
+    if (btnSelect) {
+        if (btnSelect.value === 'custom') {
+            buttonLabel = document.getElementById('cButtonLabelCustom')?.value.trim() || null;
+        } else if (btnSelect.value) {
+            buttonLabel = btnSelect.value;
+        }
+    }
+
+    const startVal = document.getElementById('cStartTime')?.value || null;
+    const channelVal = document.getElementById('cChannelId')?.value.trim() || null;
+    if (startVal && !channelVal) {
+        showToast(currentLang==='uz' ? 'Rejalashtirilgan o\'yin uchun kanal tanlang!' : currentLang==='ru' ? 'Выберите канал для отложенной публикации!' : 'Pick a channel for a scheduled giveaway!', 'error');
+        return;
+    }
+
+    const body = {
+        post_text: postText,
+        post_file_id: uploadedFileId || null,
+        post_media_type: uploadedFileId ? 'photo' : null,
+        winner_count: parseInt(document.getElementById('cWinners').value) || 1,
+        button_label: buttonLabel,
+        boost_channels: document.getElementById('cBoostChannels')?.value.trim() || null,
+        winner_template: document.getElementById('cWinnerTpl')?.value.trim() || null,
+        reminder_template: document.getElementById('cReminderTpl')?.value.trim() || null,
+        is_test: document.getElementById('cIsTest')?.checked || false,
+        duration: duration,
+        deadline: dtToIso(deadline),
+        scheduled_start: dtToIso(startVal),
+        channel_id: channelVal,
+        required_channels: document.getElementById('cChannels')?.value.trim() || null,
+    };
+    const res = await api('/create-giveaway', 'POST', body);
+    if (res.error) { showToast(res.error, 'error'); return; }
+    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    uploadedFileId = null; uploadedPhotoDataUrl = null;
+    if (res.published) {
+        showToast(currentLang==='uz' ? '🟢 Kanalga joylandi!' : currentLang==='ru' ? '🟢 Опубликовано в канале!' : '🟢 Published to channel!');
+        switchTab('games');
+    } else if (body.scheduled_start) {
+        showToast(currentLang==='uz' ? '⏳ Belgilangan vaqtda bot o\'zi joylaydi' : currentLang==='ru' ? '⏳ Бот опубликует в назначенное время' : '⏳ The bot will publish it on schedule');
+        switchTab('games');
+    } else {
+        showCreatedSharePrompt(res.id, 'gw');
+    }
 }
 
 function showCreatedSharePrompt(gameId, gameType) {
@@ -1941,7 +2163,8 @@ function showCreatedSharePrompt(gameId, gameType) {
             <div class="form-hint" id="shareStatus"></div>
         </div>
 
-        <button class="btn btn-secondary" style="margin-top:0;" onclick="navigator.clipboard.writeText('${deepLink}');showToast(t('copied'));">${copyLabel}</button>
+        ${gameType === 'gw' ? `<button class="btn btn-primary" style="margin-top:0;" onclick="myGameShare(${gameId})">📤 ${currentLang==='uz'?"Postni ulashish (Telegram)":currentLang==='ru'?'Поделиться постом (Telegram)':'Share post (Telegram)'}</button>` : ''}
+        <button class="btn btn-secondary" style="margin-top:10px;" onclick="navigator.clipboard.writeText('${deepLink}');showToast(t('copied'));">${copyLabel}</button>
         <button class="btn btn-secondary" style="margin-top:10px;opacity:0.7;" onclick="switchTab('home')">${doneLabel}</button>
     </div>`;
 
@@ -1975,7 +2198,7 @@ async function shareFullPost(gameId, gameType) {
     if (!channel) { showToast(currentLang === 'uz' ? 'Kanal kiriting!' : 'Enter channel!', 'error'); return; }
 
     status.textContent = '⏳...';
-    const res = await api('/share-to-channel', 'POST', { giveaway_id: gameId, channel: channel });
+    const res = await api('/share-to-channel', 'POST', { giveaway_id: gameId, channel: channel, game_type: gameType });
     if (res.error) {
         status.textContent = '❌ ' + res.error;
         status.style.color = 'var(--red)';

@@ -31,6 +31,7 @@ from bot.models.giveaway import (
     GiveawayWinner,
 )
 from bot.utils.subscription import get_unsubscribed, parse_channels
+from bot.utils.timeutil import iso_utc, parse_iso_to_utc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/miniapp/api")
@@ -199,7 +200,7 @@ async def get_giveaway_info(
         "already_joined": already_joined,
         "must_subscribe": must_subscribe,
         "required_channels": required_channels or [],
-        "ends_at": giveaway.ends_at.isoformat() if giveaway.ends_at else None,
+        "ends_at": iso_utc(giveaway.ends_at),
         "winners_text": winners_text,
     }
 
@@ -274,6 +275,16 @@ async def join_giveaway(
         )
         new_count = count_result.scalar() or 0
 
+    # Credit any pending referrals. The channel-post counter is intentionally
+    # NOT edited here — the refresh_giveaway_counters job updates every post at
+    # most once a minute to stay under Telegram's edit rate limit.
+    try:
+        from telegram import Bot
+        from bot.utils.referral import verify_pending_referrals
+        await verify_pending_referrals(Bot(token=settings.BOT_TOKEN), user_id)
+    except Exception:
+        pass
+
     return {
         "success": True,
         "participants": new_count,
@@ -307,7 +318,7 @@ async def get_participants(giveaway_id: int, x_telegram_init_data: str | None = 
             {
                 "username": p.username,
                 "first_name": p.first_name,
-                "joined_at": p.joined_at.isoformat() if p.joined_at else None,
+                "joined_at": iso_utc(p.joined_at),
             }
             for p in participants
         ],
@@ -374,8 +385,8 @@ async def miniapp_active_giveaways():
                 "boost_channels": gw.boost_channels,
                 "participants": count,
                 "winner_count": gw.winner_count,
-                "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
-                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+                "ends_at": iso_utc(gw.ends_at),
+                "created_at": iso_utc(gw.created_at),
             })
     return items
 
@@ -493,7 +504,7 @@ async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
             participated.append({
                 "id": gw.id, "title": gw.title, "prize": gw.prize,
                 "status": gw.status, "won": won,
-                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+                "created_at": iso_utc(gw.created_at),
             })
 
         # Created giveaways
@@ -514,7 +525,7 @@ async def miniapp_my_games(x_telegram_init_data: str | None = Header(None)):
             created.append({
                 "id": gw.id, "title": gw.title, "prize": gw.prize,
                 "status": gw.status, "participants": count,
-                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+                "created_at": iso_utc(gw.created_at),
             })
 
         # Referral stats
@@ -574,7 +585,7 @@ async def miniapp_create_giveaway(
 
     if deadline_str:
         try:
-            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+            ends_at = parse_iso_to_utc(deadline_str)
         except (ValueError, TypeError):
             return {"error": "Noto'g'ri sana formati"}
     elif duration_key and duration_key != "none" and duration_key != "custom":
@@ -586,37 +597,63 @@ async def miniapp_create_giveaway(
     from bot.utils.subscription import serialize_channels, parse_channels as _pc
     channels_str = serialize_channels(_pc(required_channels)) if required_channels else None
 
+    # Parse scheduled_start (local/ISO → naive UTC)
+    scheduled_start = None
+    start_str = body.get("scheduled_start")
+    if start_str:
+        try:
+            scheduled_start = parse_iso_to_utc(start_str)
+        except (ValueError, TypeError):
+            return {"error": "Noto'g'ri boshlanish vaqti formati"}
+        if scheduled_start <= datetime.utcnow():
+            scheduled_start = None  # already in the past → publish immediately
+    if ends_at and ends_at <= (scheduled_start or datetime.utcnow()):
+        return {"error": "Tugash vaqti boshlanish vaqtidan keyin bo'lishi kerak"}
+
+    # Resolve channels (comma-separated): numeric IDs directly, @usernames via
+    # Telegram. A giveaway can be co-hosted by several channels at once.
+    parsed_channels: list[int] = []
+    channel_id_val = body.get("channel_id")
+    if channel_id_val:
+        from telegram import Bot
+        resolver = Bot(token=settings.BOT_TOKEN)
+        for tok in str(channel_id_val).replace("\n", ",").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            if tok.lstrip("-").isdigit():
+                parsed_channels.append(int(tok))
+            else:
+                try:
+                    chat = await resolver.get_chat(tok if tok.startswith("@") else f"@{tok}")
+                    parsed_channels.append(chat.id)
+                except Exception:
+                    return {"error": f"Kanal topilmadi: {tok}. Botni kanalga admin qiling."}
+    parsed_channel = parsed_channels[0] if parsed_channels else None
+
+    # A scheduled giveaway MUST have a resolvable channel — otherwise the
+    # publish job would fall back to the creator's private chat.
+    if scheduled_start and not parsed_channel:
+        return {"error": "Rejalashtirilgan o'yin uchun kanal tanlanishi shart"}
+
     async with async_session() as session:
-        # Parse scheduled_start
-        scheduled_start = None
-        start_str = body.get("scheduled_start")
-        if start_str:
-            try:
-                scheduled_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                pass
-
-        # Parse channel_id
-        channel_id_val = body.get("channel_id")
-        parsed_channel = None
-        if channel_id_val:
-            ch = str(channel_id_val).strip()
-            parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
-
         gw_status = "queued" if scheduled_start else "active"
 
         giveaway = Giveaway(
             title=title, post_text=post_text,
             post_file_id=body.get("post_file_id") or None,
-            post_media_type="photo" if body.get("post_file_id") else None,
+            post_media_type=(body.get("post_media_type") or "photo") if body.get("post_file_id") else None,
             winner_count=winner_count,
             required_channels=channels_str,
             button_label=body.get("button_label") or None,
             boost_channels=body.get("boost_channels") or None,
+            winner_template=(body.get("winner_template") or "").strip() or None,
+            reminder_template=(body.get("reminder_template") or "").strip() or None,
             is_test=bool(body.get("is_test", False)),
             status=gw_status,
             scheduled_start=scheduled_start,
             channel_id=parsed_channel,
+            target_channels=",".join(str(c) for c in parsed_channels) or None,
             creator_id=user_id, creator_username=username,
             chat_id=user_id,
             ends_at=ends_at,
@@ -625,7 +662,30 @@ async def miniapp_create_giveaway(
         await session.commit()
         await session.refresh(giveaway)
 
-    return {"success": True, "id": giveaway.id, "title": giveaway.title}
+    # Immediate start with chosen channels → publish to all of them right away
+    publish_error = None
+    published = 0
+    if not scheduled_start and parsed_channels:
+        from telegram import Bot
+        from bot.handlers.giveaway import publish_giveaway_to_channels
+        from bot.utils.lang import get_user_lang
+        try:
+            lang = await get_user_lang(user_id)
+            bot = Bot(token=settings.BOT_TOKEN)
+            posts, errors = await publish_giveaway_to_channels(bot, giveaway, lang)
+            published = len(posts)
+            if errors:
+                publish_error = "; ".join(f"{ch}: {str(e)[:60]}" for ch, e in errors)
+        except Exception as e:
+            logger.error("Miniapp immediate publish failed: %s", e)
+            publish_error = str(e)[:100]
+
+    return {
+        "success": True, "id": giveaway.id, "title": giveaway.title,
+        "published": published > 0,
+        "published_count": published,
+        "publish_error": publish_error,
+    }
 
 
 @router.post("/upload-photo")
@@ -676,6 +736,82 @@ async def miniapp_upload_photo(
         return {"error": "Failed to upload photo. Make sure you've started the bot first."}
 
 
+async def _send_post_media(bot, chat_id, post_text, post_file_id, post_media_type, kb=None):
+    """Send a stored post (any media type) to a chat."""
+    caption = post_text or ""
+    if post_file_id and post_media_type == "photo":
+        return await bot.send_photo(chat_id, post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+    if post_file_id and post_media_type == "video":
+        return await bot.send_video(chat_id, post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+    if post_file_id and post_media_type == "animation":
+        return await bot.send_animation(chat_id, post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+    if post_file_id and post_media_type == "document":
+        return await bot.send_document(chat_id, post_file_id, caption=caption, parse_mode="HTML", reply_markup=kb)
+    return await bot.send_message(chat_id, caption or "🎁", parse_mode="HTML", reply_markup=kb)
+
+
+async def _share_group_giveaway(gg_id: int, channel_id, user_id: int):
+    """Publish a Mini App-created comment giveaway post to a group/channel.
+
+    Saves chat_id + message_id so the bot's comment/reaction handlers (which
+    fall back to a DB lookup) start counting entries on that post.
+    """
+    from telegram import Bot
+    from bot.models.group_giveaway import GroupGiveaway, GroupGiveawayStatus
+
+    async with async_session() as session:
+        gg = (await session.execute(select(GroupGiveaway).where(GroupGiveaway.id == gg_id))).scalar_one_or_none()
+
+    if not gg:
+        return {"error": "O'yin topilmadi"}
+    if gg.creator_id != user_id and user_id not in settings.ADMIN_IDS:
+        return {"error": "Faqat yaratuvchi ulasha oladi"}
+
+    bot = Bot(token=settings.BOT_TOKEN)
+    try:
+        sent = await _send_post_media(bot, channel_id, gg.post_text, gg.post_file_id, gg.post_media_type)
+    except Exception as e:
+        logger.error("Share group giveaway failed: %s", e)
+        return {"error": f"Yuborib bo'lmadi: {str(e)[:100]}"}
+
+    is_channel = getattr(sent.chat, "type", "") == "channel"
+    async with async_session() as session:
+        g = (await session.execute(select(GroupGiveaway).where(GroupGiveaway.id == gg_id))).scalar_one()
+        g.chat_id = sent.chat.id
+        g.message_id = sent.message_id
+        g.is_channel_post = is_channel
+        g.status = GroupGiveawayStatus.ACTIVE
+        await session.commit()
+
+    return {"success": True}
+
+
+async def _share_contest(ct_id: int, channel_id, user_id: int):
+    """Publish a contest post to a group/channel with a deep-link submit button."""
+    from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
+    from bot.models.contest import Contest
+
+    async with async_session() as session:
+        ct = (await session.execute(select(Contest).where(Contest.id == ct_id))).scalar_one_or_none()
+
+    if not ct:
+        return {"error": "Konkurs topilmadi"}
+    if ct.creator_id != user_id and user_id not in settings.ADMIN_IDS:
+        return {"error": "Faqat yaratuvchi ulasha oladi"}
+
+    bot_username = settings.BOT_USERNAME or "qurachibot"
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📤 Qatnashish", url=f"https://t.me/{bot_username}?start=ct_{ct.id}")
+    ]])
+    bot = Bot(token=settings.BOT_TOKEN)
+    try:
+        await _send_post_media(bot, channel_id, ct.post_text or ct.title, ct.post_file_id, ct.post_media_type, kb)
+    except Exception as e:
+        logger.error("Share contest failed: %s", e)
+        return {"error": f"Yuborib bo'lmadi: {str(e)[:100]}"}
+    return {"success": True}
+
+
 @router.post("/share-to-channel")
 async def miniapp_share_to_channel(
     request: Request,
@@ -691,6 +827,7 @@ async def miniapp_share_to_channel(
     body = await request.json()
     giveaway_id = body.get("giveaway_id")
     channel = body.get("channel")  # @username or numeric ID
+    game_type = body.get("game_type", "gw")  # gw | gg (comment) | ct (contest)
 
     if not giveaway_id or not channel:
         return {"error": "giveaway_id va channel kerak"}
@@ -700,6 +837,11 @@ async def miniapp_share_to_channel(
     if channel_id.lstrip("-").isdigit():
         channel_id = int(channel_id)
     # else keep as string (@username)
+
+    if game_type == "gg":
+        return await _share_group_giveaway(giveaway_id, channel_id, user_id)
+    if game_type == "ct":
+        return await _share_contest(giveaway_id, channel_id, user_id)
 
     async with async_session() as session:
         result = await session.execute(
@@ -712,38 +854,50 @@ async def miniapp_share_to_channel(
     if giveaway.creator_id != user_id and user_id not in settings.ADMIN_IDS:
         return {"error": "Faqat yaratuvchi ulasha oladi"}
 
-    from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    from telegram import Bot
     bot = Bot(token=settings.BOT_TOKEN)
 
-    # Build join button
+    # Build join button (callback — web_app buttons are invalid in channels)
+    from bot.handlers.giveaway import _join_button, send_giveaway_post
     from bot.utils.lang import get_user_lang
     lang = await get_user_lang(user_id)
-    from bot.i18n import get_text
-    label = f"🎮 {get_text('gw_join_button', lang=lang)} (0)"
-    web_url = settings.WEB_URL
-    if web_url:
-        url = f"{web_url.rstrip('/')}/miniapp/giveaway?id={giveaway.id}"
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton(label, web_app=WebAppInfo(url=url))]])
-    else:
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=f"join_gw_{giveaway.id}")]])
+    current_count = 0
+    async with async_session() as session:
+        current_count = (await session.execute(
+            select(func.count(GiveawayParticipant.id)).where(GiveawayParticipant.giveaway_id == giveaway.id)
+        )).scalar() or 0
+    kb = _join_button(giveaway.id, current_count, lang, custom_label=giveaway.button_label)
 
     # Send the full post to the channel
     try:
-        if giveaway.post_file_id and giveaway.post_media_type == "photo":
-            await bot.send_photo(
-                channel_id, giveaway.post_file_id,
-                caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
-            )
-        elif giveaway.post_file_id and giveaway.post_media_type == "video":
-            await bot.send_video(
-                channel_id, giveaway.post_file_id,
-                caption=giveaway.post_text or "", parse_mode="HTML", reply_markup=kb,
-            )
-        else:
-            await bot.send_message(
-                channel_id, giveaway.post_text or giveaway.title,
-                parse_mode="HTML", reply_markup=kb,
-            )
+        msg = await send_giveaway_post(bot, channel_id, giveaway, kb)
+
+        # Remember where the post lives so auto-draw announcements, reminders
+        # and counter updates target every channel post (not the creator's DM).
+        try:
+            from bot.models.giveaway import GiveawayPost
+            async with async_session() as session:
+                g = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway.id))).scalar_one()
+                if not g.channel_id or not g.message_id:
+                    g.channel_id = msg.chat_id
+                    g.message_id = msg.message_id
+                if not g.published_at:
+                    g.published_at = datetime.utcnow()
+                existing_post = (await session.execute(
+                    select(GiveawayPost).where(
+                        GiveawayPost.giveaway_id == giveaway.id,
+                        GiveawayPost.chat_id == msg.chat_id,
+                        GiveawayPost.message_id == msg.message_id,
+                    )
+                )).scalar_one_or_none()
+                if not existing_post:
+                    session.add(GiveawayPost(
+                        giveaway_id=giveaway.id, chat_id=msg.chat_id, message_id=msg.message_id,
+                    ))
+                await session.commit()
+        except Exception as e:
+            logger.warning("Failed to persist share target for gw %s: %s", giveaway.id, e)
+
         # Success — save channel to user's list for future quick-select
         try:
             chat_info = await bot.get_chat(channel_id)
@@ -771,6 +925,78 @@ async def miniapp_share_to_channel(
     except Exception as e:
         logger.error("Share to channel failed: %s", e)
         return {"error": f"Yuborib bo'lmadi: {str(e)[:100]}"}
+
+
+@router.post("/prepare-share")
+async def miniapp_prepare_share(
+    request: Request,
+    x_telegram_init_data: str | None = Header(None),
+):
+    """Prepare the full giveaway post for Telegram's native share sheet.
+
+    Uses Bot API savePreparedInlineMessage (raw HTTP — PTB 21.6 predates it);
+    the Mini App then calls WebApp.shareMessage(id) so the user shares the
+    real post (media + join button), not just a link.
+    """
+    user = _get_user_from_header(x_telegram_init_data)
+    user_id = user["id"]
+
+    body = await request.json()
+    giveaway_id = body.get("giveaway_id")
+    if not giveaway_id:
+        return {"error": "giveaway_id kerak"}
+
+    async with async_session() as session:
+        gw = (await session.execute(select(Giveaway).where(Giveaway.id == giveaway_id))).scalar_one_or_none()
+        if not gw:
+            return {"error": "O'yin topilmadi"}
+        if gw.creator_id != user_id and user_id not in settings.ADMIN_IDS:
+            return {"error": "Faqat yaratuvchi ulasha oladi"}
+        if gw.status not in ("queued", "active"):
+            return {"error": "Bu o'yin tugagan"}
+        count = (await session.execute(
+            select(func.count(GiveawayParticipant.id)).where(GiveawayParticipant.giveaway_id == giveaway_id)
+        )).scalar() or 0
+
+    from bot.handlers.inline import _giveaway_result
+    from bot.utils.lang import get_user_lang
+    lang = await get_user_lang(user_id)
+    result = _giveaway_result(gw, lang).to_dict()
+    # Show the current participant count on the shared button
+    try:
+        result["reply_markup"]["inline_keyboard"][0][0]["text"] = (
+            result["reply_markup"]["inline_keyboard"][0][0]["text"].rsplit("(", 1)[0].strip() + f" ({count})"
+        )
+    except Exception:
+        pass
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{settings.BOT_TOKEN}/savePreparedInlineMessage",
+                json={
+                    "user_id": user_id,
+                    "result": result,
+                    "allow_user_chats": True,
+                    "allow_group_chats": True,
+                    "allow_channel_chats": True,
+                },
+            )
+            data = resp.json()
+    except Exception as e:
+        logger.error("prepare-share request failed: %s", e)
+        return {"error": "Telegram bilan bog'lanib bo'lmadi"}
+
+    if not data.get("ok"):
+        logger.warning("savePreparedInlineMessage failed: %s", data)
+        return {"error": data.get("description", "Tayyorlab bo'lmadi")}
+
+    return {
+        "success": True,
+        "prepared_message_id": data["result"]["id"],
+        "expiration_date": data["result"].get("expiration_date"),
+    }
 
 
 @router.get("/my-channels")
@@ -848,7 +1074,7 @@ async def miniapp_create_contest(
     ends_at = None
     if deadline_str:
         try:
-            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+            ends_at = parse_iso_to_utc(deadline_str)
         except (ValueError, TypeError):
             pass
     elif duration_key and duration_key not in ("none", "custom"):
@@ -876,21 +1102,33 @@ async def miniapp_create_contest(
     # If add_join_button is True, also create a Giveaway linked to this contest
     giveaway_id = None
     if add_join_button:
-        # Parse scheduled_start
+        # Parse scheduled_start (local/ISO → naive UTC)
         scheduled_start = None
         start_str = body.get("scheduled_start")
         if start_str:
             try:
-                scheduled_start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+                scheduled_start = parse_iso_to_utc(start_str)
             except (ValueError, TypeError):
                 pass
+            if scheduled_start and scheduled_start <= datetime.utcnow():
+                scheduled_start = None
 
-        # Parse channel_id
-        channel_id_val = body.get("channel_id")
+        # Resolve channel: numeric ID directly, @username via Telegram
         parsed_channel = None
+        channel_id_val = body.get("channel_id")
         if channel_id_val:
             ch = str(channel_id_val).strip()
-            parsed_channel = int(ch) if ch.lstrip("-").isdigit() else None
+            if ch.lstrip("-").isdigit():
+                parsed_channel = int(ch)
+            else:
+                try:
+                    from telegram import Bot
+                    chat = await Bot(token=settings.BOT_TOKEN).get_chat(ch if ch.startswith("@") else f"@{ch}")
+                    parsed_channel = chat.id
+                except Exception:
+                    return {"error": f"Kanal topilmadi: {ch}. Botni kanalga admin qiling."}
+        if scheduled_start and not parsed_channel:
+            return {"error": "Rejalashtirilgan o'yin uchun kanal tanlanishi shart"}
 
         gw_status = "queued" if scheduled_start else "active"
 
@@ -898,9 +1136,12 @@ async def miniapp_create_contest(
             giveaway = Giveaway(
                 title=title, post_text=post_text,
                 post_file_id=body.get("post_file_id") or None,
-                post_media_type="photo" if body.get("post_file_id") else None,
+                post_media_type=(body.get("post_media_type") or "photo") if body.get("post_file_id") else None,
                 winner_count=max(1, int(body.get("winner_count", 1))),
                 required_channels=channels_str,
+                button_label=body.get("button_label") or None,
+                boost_channels=body.get("boost_channels") or None,
+                is_test=bool(body.get("is_test", False)),
                 status=gw_status,
                 scheduled_start=scheduled_start,
                 channel_id=parsed_channel,
@@ -986,8 +1227,8 @@ async def admin_all_giveaways(
                 "status": gw.status, "participants": count,
                 "winner_count": gw.winner_count,
                 "creator_username": gw.creator_username,
-                "ends_at": gw.ends_at.isoformat() if gw.ends_at else None,
-                "created_at": gw.created_at.isoformat() if gw.created_at else None,
+                "ends_at": iso_utc(gw.ends_at),
+                "created_at": iso_utc(gw.created_at),
             })
     return items
 
@@ -1022,8 +1263,10 @@ async def admin_draw_giveaway(
         if not participants:
             return {"error": "Ishtirokchilar yo'q"}
 
-        winner_count = min(giveaway.winner_count, len(participants))
-        winners = random.sample(participants, winner_count)
+        from telegram import Bot
+        from bot.handlers.giveaway import _weighted_draw
+        bot = Bot(token=settings.BOT_TOKEN)
+        winners = await _weighted_draw(participants, giveaway.winner_count, giveaway.boost_channels, bot)
 
         for w in winners:
             session.add(GiveawayWinner(
@@ -1034,6 +1277,13 @@ async def admin_draw_giveaway(
         giveaway.status = "completed"
         giveaway.drawn_at = datetime.utcnow()
         await session.commit()
+
+    # Announce in channel (reply to post), close the post, DM winners
+    try:
+        from bot.handlers.giveaway import announce_results
+        await announce_results(bot, giveaway, winners, len(participants))
+    except Exception as e:
+        logger.warning("Admin draw announce failed for gw %s: %s", giveaway_id, e)
 
     winner_names = [f"@{w.username}" if w.username else (w.first_name or f"ID:{w.user_id}") for w in winners]
     return {"success": True, "winners": winner_names, "total_participants": len(participants)}
@@ -1060,6 +1310,14 @@ async def admin_cancel_giveaway(
 
         giveaway.status = "cancelled"
         await session.commit()
+
+    # Remove the join button from the published post, if any
+    try:
+        from telegram import Bot
+        from bot.handlers.giveaway import close_published_post
+        await close_published_post(Bot(token=settings.BOT_TOKEN), giveaway)
+    except Exception:
+        pass
 
     return {"success": True}
 
@@ -1165,7 +1423,7 @@ async def miniapp_active_contests():
                 "post_text": ct.post_text, "description": ct.description,
                 "status": ct.status.value, "type": ct.contest_type.value,
                 "submissions": sub_count, "winner_count": ct.winner_count,
-                "created_at": ct.created_at.isoformat() if ct.created_at else None,
+                "created_at": iso_utc(ct.created_at),
             })
     return items
 
@@ -1409,7 +1667,7 @@ async def miniapp_points(x_telegram_init_data: str | None = Header(None)):
         "referrals_made": loyalty.referrals_made if loyalty else 0,
         "config": POINTS_CONFIG,
         "transactions": [
-            {"amount": t.amount, "reason": t.reason, "date": t.created_at.isoformat() if t.created_at else None}
+            {"amount": t.amount, "reason": t.reason, "date": iso_utc(t.created_at)}
             for t in transactions
         ],
     }
@@ -1508,7 +1766,7 @@ async def miniapp_create_comment_giveaway(
 
     if deadline_str:
         try:
-            ends_at = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+            ends_at = parse_iso_to_utc(deadline_str)
         except (ValueError, TypeError):
             return {"error": "Noto'g'ri sana formati"}
     elif duration_key and duration_key != "none" and duration_key != "custom":
@@ -1516,6 +1774,8 @@ async def miniapp_create_comment_giveaway(
         ends_at = datetime.utcnow() + duration if duration else None
     else:
         ends_at = None
+    if ends_at and ends_at <= datetime.utcnow():
+        return {"error": "Tugash vaqti kelajakda bo'lishi kerak"}
 
     channels_str = None
     raw_channels = body.get("required_channels")
@@ -1732,7 +1992,7 @@ async def admin_get_feedback(
             "type": f.reason,
             "text": f.content_text,
             "user_id": f.user_id,
-            "date": f.created_at.isoformat() if f.created_at else None,
+            "date": iso_utc(f.created_at),
             "resolved": f.resolved if hasattr(f, 'resolved') else False,
         }
         for f in items
